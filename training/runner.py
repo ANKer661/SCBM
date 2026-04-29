@@ -1,9 +1,8 @@
 """
 Staged training runner.
 
-This module intentionally reuses the legacy epoch functions while the
-orchestration is moved out of train.py. Later phases can replace the epoch
-functions with adapter-based implementations without touching the entrypoint.
+The runner coordinates setup and stage execution. Model-specific batch behavior
+lives in training.adapters, while the epoch loops live in training.epoch.
 """
 
 import time
@@ -15,18 +14,13 @@ import torch
 
 from models.losses import create_loss
 from models.models import create_model
+from training.adapters import create_adapter
+from training.epoch import train_one_epoch, validate_one_epoch
 from training.logging import finish_wandb, setup_wandb
 from training.optim import build_optimizer, build_scheduler
 from training.stages import apply_freeze_policy, apply_stage_cleanup, build_stage_plan
 from utils.data import get_concept_groups, get_data, get_empirical_covariance
-from utils.training import (
-    Custom_Metrics,
-    freeze_module,
-    train_one_epoch_cbm,
-    train_one_epoch_scbm,
-    validate_one_epoch_cbm,
-    validate_one_epoch_scbm,
-)
+from utils.training import Custom_Metrics, freeze_module
 from utils.utils import reset_random_seeds
 
 
@@ -53,11 +47,10 @@ class ExperimentRunner:
 
         model = self._create_model(train_loader)
         loss_fn = create_loss(self.config)
+        adapter = create_adapter(model, loss_fn, self.config)
         metrics = Custom_Metrics(self.config.data.num_concepts, self.device).to(
             self.device
         )
-
-        train_one_epoch, validate_one_epoch = self._select_epoch_functions()
 
         print(
             "TRAINING "
@@ -67,13 +60,10 @@ class ExperimentRunner:
         )
 
         t_epochs = self._run_training(
-            model,
+            adapter,
             train_loader,
             val_loader,
             metrics,
-            loss_fn,
-            train_one_epoch,
-            validate_one_epoch,
         )
 
         model.apply(freeze_module)
@@ -86,11 +76,10 @@ class ExperimentRunner:
         print("\nEVALUATION ON THE TEST SET:\n")
         validate_one_epoch(
             test_loader,
-            model,
+            adapter,
             metrics,
             t_epochs,
             self.config,
-            loss_fn,
             self.device,
             test=True,
             concept_names_graph=concept_names_graph,
@@ -161,11 +150,6 @@ class ExperimentRunner:
         model.to(self.device)
         return model
 
-    def _select_epoch_functions(self):
-        if self.config.model.model == "cbm":
-            return train_one_epoch_cbm, validate_one_epoch_cbm
-        return train_one_epoch_scbm, validate_one_epoch_scbm
-
     def _select_intervention_function(self):
         from utils.intervention import intervene_cbm, intervene_scbm
 
@@ -175,67 +159,55 @@ class ExperimentRunner:
 
     def _run_training(
         self,
-        model,
+        adapter,
         train_loader,
         val_loader,
         metrics,
-        loss_fn,
-        train_one_epoch,
-        validate_one_epoch,
     ):
         stages = build_stage_plan(self.config)
         for stage in stages:
             self._run_stage(
                 stage,
-                model,
+                adapter,
                 train_loader,
                 val_loader,
                 metrics,
-                loss_fn,
-                train_one_epoch,
-                validate_one_epoch,
             )
         return stages[-1].epochs
 
     def _run_stage(
         self,
         stage,
-        model,
+        adapter,
         train_loader,
         val_loader,
         metrics,
-        loss_fn,
-        train_one_epoch,
-        validate_one_epoch,
     ):
         print(stage.message)
-        apply_freeze_policy(model, stage.freeze_policy)
+        apply_freeze_policy(adapter.model, stage.freeze_policy)
 
-        optimizer = build_optimizer(self.config.model, model)
+        optimizer = build_optimizer(self.config.model, adapter.model)
         lr_scheduler = build_scheduler(self.config.model, optimizer)
         for epoch in range(stage.epochs):
             if epoch % stage.validate_every == 0:
                 print("\nEVALUATION ON THE VALIDATION SET:\n")
                 validate_one_epoch(
                     val_loader,
-                    model,
+                    adapter,
                     metrics,
                     epoch,
                     self.config,
-                    loss_fn,
                     self.device,
                 )
             train_one_epoch(
                 train_loader,
-                model,
+                adapter,
                 optimizer,
-                stage.mode,
+                stage,
                 metrics,
                 epoch,
-                self.config,
-                loss_fn,
                 self.device,
             )
             lr_scheduler.step()
 
-        apply_stage_cleanup(model, stage)
+        apply_stage_cleanup(adapter.model, stage)
