@@ -25,16 +25,17 @@ Functions:
     get_CIFAR100_CBM_dataloader: Returns DataLoaders for training, validation, and testing splits.
 """
 
+
 import ctypes
+import multiprocessing as mp
 import os
 import pickle
-from PIL import Image
-import numpy as np
-import multiprocessing as mp
 
+import numpy as np
 import torch
-from torch.utils.data import Dataset
 import torchvision.transforms as transforms
+from PIL import Image
+from torch.utils.data import Dataset
 
 
 class CUB_DatasetGenerator(Dataset): 
@@ -280,8 +281,8 @@ def train_test_split_CUB(root_dir):
     return data_train, data_val, data_test
 
 
-def get_CUB_dataloaders(config):
-    """Returns a dictionary of data loaders for the CUB dataset, for the training, validation, and test sets."""
+def build_CUB_datasets(config):
+    """Returns Dataset objects for the CUB training, validation, and test sets."""
 
     train_imgs, val_imgs, test_imgs = train_test_split_CUB(
         root_dir=config.data_path,
@@ -321,3 +322,6 @@ def get_CUB_dataloaders(config):
         image_datasets["val"],
         image_datasets["test"],
     )
+
+
+get_CUB_dataloaders = build_CUB_datasets

@@ -5,30 +5,30 @@ This module provides a custom DataLoader for the CIFAR-10 dataset, including con
 The dataset is preprocessed with transformations.
 
 Classes:
-    CIFAR10_CBM_dataloader: Custom DataLoader for CIFAR-10 with concept labels.
+    CIFAR10CBMDataset: Custom Dataset for CIFAR-10 with concept labels.
 
 Functions:
-    get_CIFAR10_CBM_dataloader: Returns DataLoaders for training, validation, and testing splits.
+    build_CIFAR10_CBM_datasets: Returns Dataset objects for training, validation, and testing splits.
 """
 
 import torch
 from torchvision import datasets, transforms
 
 
-def get_CIFAR10_CBM_dataloader(datapath):
+def build_CIFAR10_CBM_datasets(datapath):
     datapath = datapath + "cifar10/"
     image_datasets = {
-        "train": CIFAR10_CBM_dataloader(
+        "train": CIFAR10CBMDataset(
             root=datapath,
             train=True,
             download=False,
         ),
-        "val": CIFAR10_CBM_dataloader(
+        "val": CIFAR10CBMDataset(
             root=datapath,
             train=False,
             download=False,
         ),
-        "test": CIFAR10_CBM_dataloader(
+        "test": CIFAR10CBMDataset(
             root=datapath,
             train=False,
             download=False,
@@ -38,10 +38,10 @@ def get_CIFAR10_CBM_dataloader(datapath):
     return image_datasets["train"], image_datasets["val"], image_datasets["test"]
 
 
-class CIFAR10_CBM_dataloader(datasets.CIFAR10):
+class CIFAR10CBMDataset(datasets.CIFAR10):
 
     def __init__(self, *args, **kwargs):
-        super(CIFAR10_CBM_dataloader, self).__init__(*args, **kwargs)
+        super(CIFAR10CBMDataset, self).__init__(*args, **kwargs)
 
         if kwargs["train"]:
             self.transform = transforms.Compose(
@@ -81,3 +81,7 @@ class CIFAR10_CBM_dataloader(datasets.CIFAR10):
             "features": X,
             "concepts": self.concepts[idx],
         }
+
+
+CIFAR10_CBM_dataloader = CIFAR10CBMDataset
+get_CIFAR10_CBM_dataloader = build_CIFAR10_CBM_datasets

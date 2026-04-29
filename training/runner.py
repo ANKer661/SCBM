@@ -14,12 +14,13 @@ import torch
 
 from models.losses import create_loss
 from models.models import create_model
+from datasets.datamodule import build_dataloaders
 from training.adapters import create_adapter
 from training.epoch import train_one_epoch, validate_one_epoch
 from training.logging import finish_wandb, setup_wandb
 from training.optim import build_optimizer, build_scheduler
 from training.stages import apply_freeze_policy, apply_stage_cleanup, build_stage_plan
-from utils.data import get_concept_groups, get_data, get_empirical_covariance
+from utils.data import get_concept_groups, get_empirical_covariance
 from utils.training import Custom_Metrics, freeze_module
 from utils.utils import reset_random_seeds
 
@@ -38,11 +39,10 @@ class ExperimentRunner:
         self.experiment_path = self._setup_experiment_path()
         setup_wandb(self.config, Path(__file__).absolute().parents[1])
 
-        train_loader, val_loader, test_loader = get_data(
-            self.config,
-            self.config.data,
-            gen,
-        )
+        dataloaders = build_dataloaders(self.config, gen)
+        train_loader = dataloaders.train
+        val_loader = dataloaders.val
+        test_loader = dataloaders.test
         concept_names_graph = get_concept_groups(self.config.data)
 
         model = self._create_model(train_loader)

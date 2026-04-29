@@ -2,14 +2,9 @@
 Utility functions for data loading.
 """
 
-import os
 import torch
-from torch.utils.data import DataLoader
 
-from datasets.synthetic_dataset import get_synthetic_datasets
-from datasets.CUB_dataset import get_CUB_dataloaders
-from datasets.cifar10_dataset import get_CIFAR10_CBM_dataloader
-from datasets.cifar100_dataset import get_CIFAR100_CBM_dataloader
+from datasets.datamodule import build_dataloaders
 from utils.utils import numerical_stability_check
 
 
@@ -17,9 +12,7 @@ def get_data(config_base, config, gen):
     """
     Parse the configuration file and return the relevant dataset loaders.
 
-    This function parses the provided configuration file and returns the appropriate dataset loaders based on the
-    specified dataset type. It also sets the data path based on the hostname or the configuration file if working
-    locally and on a cluster. The function supports synthetic datasets, CUB, CIFAR-10, and CIFAR-100 datasets.
+    Compatibility wrapper around datasets.datamodule.build_dataloaders.
 
     Args:
         config_base (dict): The base configuration dictionary.
@@ -29,83 +22,8 @@ def get_data(config_base, config, gen):
     Returns:
         tuple: A tuple containing the training data loader, validation data loader, and test data loader.
     """
-    hostname = os.uname()[1]
-    if "biomed" in hostname:
-        # Remote Datafolder for our group cluster
-        config.data_path = "/cluster/dataset/vogtlab/Projects/CBM/"
-    elif "data_path" not in config:
-        # Local Datafolder if not already specified in yaml
-        config.data_path = "../datasets/"
-    elif config.data_path is None:
-        config.data_path = "../datasets/"
-    else:
-        pass
-
-    if config.dataset == "synthetic":
-        print("SYNTHETIC DATASET")
-        type = None
-        if "sim_type" in config:
-            type = config.sim_type
-            print("SIMULATION TYPE: " + str(type))
-            if config.num_classes > 2:
-                raise NotImplementedError(
-                    "ERROR: Only binary classification is supported for synthetic data."
-                )
-        trainset, validset, testset = get_synthetic_datasets(
-            num_vars=config.num_covariates,
-            num_points=config.num_points,
-            num_predicates=config.num_concepts,
-            train_ratio=0.6,
-            val_ratio=0.2,
-            type=type,
-            seed=config_base.seed,
-        )
-    elif config.dataset == "CUB":
-        print("CUB DATASET")
-        trainset, validset, testset = get_CUB_dataloaders(
-            config,
-        )
-    elif config.dataset == "cifar10":
-        print("CIFAR-10 DATASET")
-        trainset, validset, testset = get_CIFAR10_CBM_dataloader(
-            config.data_path,
-        )
-    elif config.dataset == "cifar100":
-        print("CIFAR-100 DATASET")
-        trainset, validset, testset = get_CIFAR100_CBM_dataloader(
-            config.data_path,
-        )
-    else:
-        NotImplementedError("ERROR: Dataset not supported!")
-
-    config = config_base
-    train_loader = DataLoader(
-        trainset,
-        batch_size=config.model.train_batch_size,
-        shuffle=True,
-        num_workers=config.workers,
-        pin_memory=True,
-        generator=gen,
-        drop_last=True,
-        persistent_workers=True,
-    )
-    val_loader = DataLoader(
-        validset,
-        batch_size=config.model.val_batch_size,
-        shuffle=True,
-        num_workers=config.workers,
-        pin_memory=True,
-        generator=gen,
-        persistent_workers=True,
-    )
-    test_loader = DataLoader(
-        testset,
-        batch_size=config.model.val_batch_size,
-        num_workers=config.workers,
-        generator=gen,
-    )
-
-    return train_loader, val_loader, test_loader
+    loaders = build_dataloaders(config_base, gen)
+    return loaders.train, loaders.val, loaders.test
 
 
 def get_empirical_covariance(dataloader):
