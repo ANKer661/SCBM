@@ -43,22 +43,15 @@ def random_nonlin_map(n_in, n_out, n_hidden, rank=100):
     W_1 = make_low_rank_matrix(n_hidden, n_hidden, effective_rank=rank)
     W_2 = make_low_rank_matrix(n_hidden, n_out, effective_rank=rank)
     # No biases: ?
-    # b_0 = np.random.uniform(0, 0, (1, n_hidden))
-    # b_1 = np.random.uniform(0, 0, (1, n_hidden))
-    # b_2 = np.random.uniform(0, 0, (1, n_out))
-    # nlin_map = lambda x: np.matmul(
-    #     ReLU(
-    #         np.matmul(ReLU(np.matmul(x, W_0) + np.tile(b_0, (x.shape[0], 1))), W_1)
-    #         + np.tile(b_1, (x.shape[0], 1))
-    #     ),
-    #     W_2,
-    # ) + np.tile(b_2, (x.shape[0], 1))
+    b_0 = np.random.uniform(0, 0, (1, n_hidden))
+    b_1 = np.random.uniform(0, 0, (1, n_hidden))
+    b_2 = np.random.uniform(0, 0, (1, n_out))
 
     def nlin_map(x):
-        h1 = np.maximum(0, x @ W_0)
-        h2 = np.maximum(0, h1 @ W_1)
+        h1 = np.maximum(0, x @ W_0 + np.tile(b_0, (x.shape[0], 1)))
+        h2 = np.maximum(0, h1 @ W_1 + np.tile(b_1, (x.shape[0], 1)))
 
-        return h2 @ W_2
+        return h2 @ W_2 + np.tile(b_2, (x.shape[0], 1))
 
     return nlin_map
 
