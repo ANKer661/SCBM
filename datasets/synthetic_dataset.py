@@ -21,7 +21,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.datasets import make_low_rank_matrix
 
 import torch
-from torch.utils import data
+from torch.utils.data import Dataset
 
 
 def random_nonlin_map(n_in, n_out, n_hidden, rank=100):
@@ -124,7 +124,7 @@ def generate_synthetic_data_correlated_c(p: int, n: int, k: int, seed: int):
     return X, c, y
 
 
-class SyntheticDataset(data.dataset.Dataset):
+class SyntheticDataset(Dataset):
     """
     Dataset class for the nonlinear synthetic data
     """
@@ -134,10 +134,10 @@ class SyntheticDataset(data.dataset.Dataset):
         num_vars: int,
         num_points: int,
         num_predicates: int,
-        type: str = None,
-        indices: np.ndarray = None,
+        sim_type: str | None = None,
+        indices: np.ndarray | None = None,
         seed: int = 42,
-    ):
+    ) -> None:
         """
         Initialize the SyntheticDataset.
 
@@ -145,16 +145,16 @@ class SyntheticDataset(data.dataset.Dataset):
             num_vars (int): Number of covariates.
             num_points (int): Number of data points.
             num_predicates (int): Number of concepts.
-            type (str, optional): Type of synthetic data to generate. Default is None.
+            sim_type (str, optional): Type of synthetic data to generate. Default is None.
             indices (numpy.ndarray, optional): Indices of the data points to be kept. Default is None.
             seed (int, optional): Random generator seed. Default is 42.
         """
         # Shall a partial predicate set be used?
         self.predicate_idx = np.arange(0, num_predicates)
-        if type == "correlated_c":
+        if sim_type == "correlated_c":
             generate_synthetic_data = generate_synthetic_data_correlated_c
         else:
-            ValueError("Simulation type not implemented!")
+            raise ValueError("Simulation type not implemented!")
 
         self.X, self.c, self.y = generate_synthetic_data(
             p=num_vars, n=num_points, k=num_predicates, seed=seed
@@ -190,7 +190,7 @@ def get_synthetic_datasets(
     train_ratio: float = 0.6,
     val_ratio: float = 0.2,
     seed: int = 42,
-    type: str = None,
+    sim_type: str | None = None,
 ):
     """
     Construct dataset objects for the synthetic data.
@@ -202,7 +202,7 @@ def get_synthetic_datasets(
         train_ratio (float, optional): Ratio of training set size. Default is 0.6.
         val_ratio (float, optional): Ratio of validation set size. Default is 0.2.
         seed (int, optional): Random generator seed. Default is 42.
-        type (str, optional): Type of synthetic data to generate. Default is None.
+        sim_type (str, optional): Type of synthetic data to generate. Default is None.
 
     Returns:
         tuple: Dataset objects for the training, validation, and test sets.
@@ -225,7 +225,7 @@ def get_synthetic_datasets(
             num_predicates=num_predicates,
             indices=indices_train,
             seed=seed,
-            type=type,
+            sim_type=sim_type,
         ),
         "val": SyntheticDataset(
             num_vars=num_vars,
@@ -233,7 +233,7 @@ def get_synthetic_datasets(
             num_predicates=num_predicates,
             indices=indices_val,
             seed=seed,
-            type=type,
+            sim_type=sim_type,
         ),
         "test": SyntheticDataset(
             num_vars=num_vars,
@@ -241,7 +241,7 @@ def get_synthetic_datasets(
             num_predicates=num_predicates,
             indices=indices_test,
             seed=seed,
-            type=type,
+            sim_type=sim_type,
         ),
     }
 

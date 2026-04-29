@@ -43,7 +43,7 @@ def build_datasets(config_base, config_data) -> DatasetSplits:
             num_predicates=config_data.num_concepts,
             train_ratio=0.6,
             val_ratio=0.2,
-            type=sim_type,
+            sim_type=sim_type,
             seed=config_base.seed,
         )
     elif config_data.dataset == "CUB":
