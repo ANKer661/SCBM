@@ -3,9 +3,9 @@
 import math
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.distributions import MultivariateNormal, RelaxedBernoulli
-import torch.nn.functional as F
 
 from models.concept_backbones import build_encoder, build_head
 from utils.training import freeze_module, unfreeze_module
@@ -40,7 +40,7 @@ class SCBM(nn.Module):
             Perform an intervention on the model's concept predictions.
     """
 
-    def __init__(self, config):
+    def __init__(self, config) -> None:
         super(SCBM, self).__init__()
 
         # Configuration arguments
@@ -62,8 +62,9 @@ class SCBM(nn.Module):
 
         self.init_temp = 1.0
         self.final_temp = 0.5
-        self.temp_decay_rate = (math.log(self.final_temp) - math.log(self.init_temp)) / float(self.num_epochs)
-        
+        self.temp_decay_rate = (math.log(self.final_temp) - math.log(self.init_temp)) / float(
+            self.num_epochs
+        )
 
         # Architectures
         # Encoder h(.)
@@ -78,9 +79,7 @@ class SCBM(nn.Module):
                 torch.zeros(int(self.num_concepts * (self.num_concepts + 1) / 2))
             )  # Predict lower triangle of concept covariance
         elif self.cov_type == "empirical":
-            self.sigma_concepts = torch.zeros(
-                int(self.num_concepts * (self.num_concepts + 1) / 2)
-            )
+            self.sigma_concepts = torch.zeros(int(self.num_concepts * (self.num_concepts + 1) / 2))
         else:
             self.sigma_concepts = nn.Linear(
                 n_features,
@@ -102,7 +101,14 @@ class SCBM(nn.Module):
 
         self.head = build_head(self.num_concepts, self.pred_dim, self.head_arch)
 
-    def forward(self, x, epoch, validation=False, return_full=False, c_true=None):
+    def forward(
+        self,
+        x: torch.Tensor,
+        epoch: int,
+        validation: bool = False,
+        return_full: bool = False,
+        c_true: torch.Tensor | None = None,
+    ):
         """
         Perform a forward pass through the Stochastic Concept Bottleneck Model (SCBM).
 
@@ -135,10 +141,19 @@ class SCBM(nn.Module):
         # Get mu and cholesky decomposition of covariance
         c_mu = self.mu_concepts(intermediate)
         if self.cov_type == "global":
+            assert isinstance(self.sigma_concepts, nn.Parameter), (
+                "sigma_concepts must be a learnable parameter for global covariance."
+            )
             c_sigma = self.sigma_concepts.repeat(c_mu.size(0), 1)
         elif self.cov_type == "empirical":
+            assert isinstance(self.sigma_concepts, torch.Tensor), (
+                "sigma_concepts must be a fixed tensor for empirical covariance."
+            )
             c_sigma = self.sigma_concepts.unsqueeze(0).repeat(c_mu.size(0), 1, 1)
         else:
+            assert isinstance(self.sigma_concepts, nn.Linear), (
+                "sigma_concepts must be a linear layer for amortized covariance."
+            )
             c_sigma = self.sigma_concepts(intermediate)
 
         if self.cov_type == "empirical":
@@ -149,9 +164,7 @@ class SCBM(nn.Module):
                 (c_sigma.shape[0], self.num_concepts, self.num_concepts),
                 device=c_sigma.device,
             )
-            rows, cols = torch.tril_indices(
-                row=self.num_concepts, col=self.num_concepts, offset=0
-            )
+            rows, cols = torch.tril_indices(row=self.num_concepts, col=self.num_concepts, offset=0)
             diag_idx = rows == cols
             c_triang_cov[:, rows, cols] = c_sigma
             c_triang_cov[:, range(self.num_concepts), range(self.num_concepts)] = (
@@ -170,6 +183,9 @@ class SCBM(nn.Module):
             # No backpropagation necessary
             c_mcmc = torch.bernoulli(c_mcmc_prob)
         elif self.training_mode == "independent":
+            assert c_true is not None, (
+                "Ground-truth concepts must be provided for independent training mode."
+            )
             c_mcmc = c_true.unsqueeze(-1).repeat(1, 1, self.num_monte_carlo).float()
         else:
             # Backpropagation necessary
@@ -184,7 +200,7 @@ class SCBM(nn.Module):
                 c_mcmc = mcmc_hard - mcmc_relaxed.detach() + mcmc_relaxed
             else:
                 c_mcmc = mcmc_relaxed
-                
+
         y_pred_logits = self.compute_y_pred_logits(c_mcmc, c_mcmc_logit)
 
         # Return concept mu for interventions
@@ -193,28 +209,30 @@ class SCBM(nn.Module):
         else:
             return c_mcmc_prob, c_triang_cov, y_pred_logits
 
-    def compute_y_pred_logits(self, c_mcmc_probs, c_mcmc_logits):
+    def compute_y_pred_logits(
+        self, c_mcmc_probs: torch.Tensor, c_mcmc_logits: torch.Tensor
+    ) -> torch.Tensor:
         # Pick the concept tensor: [B, C, M]
         x = c_mcmc_probs if self.concept_learning == "hard" else c_mcmc_logits
         B, C, M = x.shape
 
         # Run the head over all M samples at once: reshape to [B*M, C]
-        x_flat = x.permute(0, 2, 1).reshape(B * M, C)        # [B*M, C]
-        y_logits_flat = self.head(x_flat)                     # [B*M, K] or [B*M, 1]
+        x_flat = x.permute(0, 2, 1).reshape(B * M, C)  # [B*M, C]
+        y_logits_flat = self.head(x_flat)  # [B*M, K] or [B*M, 1]
 
         if self.pred_dim == 1:
             # Binary: average Bernoulli probs then convert back to logits
             y_probs = torch.sigmoid(y_logits_flat).view(B, M, 1).mean(dim=1)  # [B, 1]
-            y_pred_logits = torch.logit(y_probs, eps=1e-6)                    # [B, 1]
+            y_pred_logits = torch.logit(y_probs, eps=1e-6)  # [B, 1]
             return y_pred_logits
         else:
             # Multiclass: compute log(mean softmax) in a numerically stable way:
             # log(mean_i p_i) == logsumexp(log p_i) - log(M), where log p_i = log_softmax(logits_i)
             y_log_probs = F.log_softmax(y_logits_flat, dim=-1).view(B, M, self.pred_dim)  # [B, M, K]
-            y_pred_log_probs = torch.logsumexp(y_log_probs, dim=1) - math.log(M)          # [B, K]
+            y_pred_log_probs = torch.logsumexp(y_log_probs, dim=1) - math.log(M)  # [B, K]
             return y_pred_log_probs
 
-    def intervene(self, c_mcmc_probs, c_mcmc_logits):
+    def intervene(self, c_mcmc_probs: torch.Tensor, c_mcmc_logits: torch.Tensor) -> torch.Tensor:
         y_pred_probs_i = 0
         c_hard = torch.bernoulli(c_mcmc_probs)
         for i in range(self.num_monte_carlo):
@@ -237,15 +255,15 @@ class SCBM(nn.Module):
 
         return y_pred_logits
 
-    def compute_temperature(self, epoch):
+    def compute_temperature(self, epoch: int) -> float:
         curr_temp = max(self.init_temp * math.exp(self.temp_decay_rate * epoch), self.final_temp)
         self.curr_temp = curr_temp
         return curr_temp
 
-    def freeze_c(self):
+    def freeze_c(self) -> None:
         self.head.apply(freeze_module)
 
-    def freeze_t(self):
+    def freeze_t(self) -> None:
         self.head.apply(unfreeze_module)
         self.encoder.apply(freeze_module)
         self.mu_concepts.apply(freeze_module)
