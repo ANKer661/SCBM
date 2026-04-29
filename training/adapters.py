@@ -24,7 +24,7 @@ class LossOutput:
     target_loss: torch.Tensor
     concepts_loss: torch.Tensor
     total_loss: torch.Tensor
-    precision_loss: torch.Tensor | None = None
+    precision_matrix_loss: torch.Tensor | None = None
 
 
 class BaseAdapter:
@@ -50,8 +50,8 @@ class BaseAdapter:
 
     def update_metrics(self, metrics, losses: LossOutput, batch: BatchTensors, output):
         kwargs = {}
-        if losses.precision_loss is not None:
-            kwargs["prec_loss"] = losses.precision_loss
+        if losses.precision_matrix_loss is not None:
+            kwargs["prec_loss"] = losses.precision_matrix_loss
 
         metrics.update(
             losses.target_loss,
@@ -98,7 +98,7 @@ class SCBMAdapter(BaseAdapter):
         )
 
     def compute_loss(self, output: BatchOutput, batch: BatchTensors):
-        target_loss, concepts_loss, precision_loss, total_loss = self.loss_fn(
+        target_loss, concepts_loss, precision_matrix_loss, total_loss = self.loss_fn(
             output.concept_probs,
             batch.concepts,
             output.target_logits,
@@ -108,13 +108,14 @@ class SCBMAdapter(BaseAdapter):
         return LossOutput(
             target_loss=target_loss,
             concepts_loss=concepts_loss,
-            precision_loss=precision_loss,
+            precision_matrix_loss=precision_matrix_loss,
             total_loss=total_loss,
         )
 
     def backward_loss(self, losses: LossOutput, stage):
         if stage.mode == "c":
-            return losses.concepts_loss + losses.precision_loss
+            assert losses.precision_matrix_loss is not None
+            return losses.concepts_loss + losses.precision_matrix_loss
         return super().backward_loss(losses, stage)
 
     def update_metrics(self, metrics, losses: LossOutput, batch: BatchTensors, output):
