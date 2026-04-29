@@ -166,3 +166,6 @@ experiments/
 outputs/
 .vscode/
 multirun/
+*.DS_Store
+data
+AGENTS.md
