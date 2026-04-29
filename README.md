@@ -11,7 +11,7 @@ We show empirically on synthetic tabular and natural image datasets that our app
 ## Instructions
 
 1. Install the packages and dependencies in the file `environment.yml`. 
-2. Download the datasets described in the manuscript and update the `data_path` variable in `./configs/data/data_defaults.yaml`. For CUB, we use the original Concept Bottleneck Model's CUB version, as well as [this](https://github.com/dtak/addressing-leakage/blob/c4656a674680593cccf2cbeea7f62e431dbb7401/attributes_and_labels/concept_names.txt) file. For CIFAR, we use the concept names from Label-Free Concept Bottleneck Models. 
+2. Download the datasets described in the manuscript. By default, the code expects local datasets under `./data/` via `data_path` in `./configs/data/data_defaults.yaml`; override `data.data_path=/path/to/data/` if your datasets live elsewhere. For CUB, we use the original Concept Bottleneck Model's CUB version, as well as [this](https://github.com/dtak/addressing-leakage/blob/c4656a674680593cccf2cbeea7f62e431dbb7401/attributes_and_labels/concept_names.txt) file. For CIFAR, we use the concept names from Label-Free Concept Bottleneck Models.
 3. If using CIFAR-10 / CIFAR-100, run `./datasets/create_dataset_cifar.py`
 4. For Weights & Biases support, set mode to 'online' and adjust entity in `./configs/config.yaml`.
 5. Run the script `train.py` with the desired configuration of dataset and model from the `./configs/` folder. We provide a description of all arguments in the config files.  
@@ -44,4 +44,3 @@ year={2024}
 url={https://openreview.net/forum?id=iSjqTQ5S1f}
 }
 ```
-

@@ -1,1 +1,1 @@
-data_path: '../datasets/'  # Directory of data
+data_path: './data/'  # Default directory for local datasets.
