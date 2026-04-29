@@ -6,7 +6,7 @@ from models.cbm import CBM
 from models.scbm import SCBM
 
 
-def create_model(config):
+def create_model(config) -> torch.nn.Module:
     """
     Parse the configuration file and return a relevant model.
     """
@@ -20,4 +20,4 @@ def create_model(config):
         model = SCBM(config)
     if config.model.compile:
         model = torch.compile(model)
-    return model
+    return model  # type: ignore

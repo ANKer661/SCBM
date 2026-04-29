@@ -13,7 +13,7 @@ from pathlib import Path
 import torch
 
 from models.losses import create_loss
-from models.models import create_model
+from models.factory import create_model
 from datasets.datamodule import build_dataloaders
 from training.adapters import create_adapter
 from training.epoch import train_one_epoch, validate_one_epoch
@@ -45,7 +45,7 @@ class ExperimentRunner:
         test_loader = dataloaders.test
         concept_names_graph = get_concept_groups(self.config.data)
 
-        model = self._create_model(train_loader)
+        model = self._setup_model(train_loader)
         loss_fn = create_loss(self.config)
         adapter = create_adapter(model, loss_fn, self.config)
         metrics = Custom_Metrics(self.config.data.num_concepts, self.device).to(
@@ -127,7 +127,7 @@ class ExperimentRunner:
         print("Experiment path: ", experiment_path)
         return experiment_path
 
-    def _create_model(self, train_loader):
+    def _setup_model(self, train_loader):
         model = create_model(self.config)
         if self.config.model.get("cov_type") == "empirical":
             model.sigma_concepts = get_empirical_covariance(train_loader).to(
