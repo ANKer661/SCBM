@@ -169,7 +169,7 @@ class CBM(nn.Module):
 
         # Relax bernoulli sampling with Gumbel Softmax to allow for backpropagation
         elif self.training_mode == "joint":
-            curr_temp = self.compute_temperature(epoch, device=c_prob.device)
+            curr_temp = self.compute_temperature(epoch)
             dist = RelaxedBernoulli(temperature=curr_temp, probs=c_prob)
             c_relaxed = dist.rsample([self.num_monte_carlo]).movedim(0, -1)
             if self.straight_through:
@@ -345,7 +345,8 @@ class CBM(nn.Module):
         concepts_mask: torch.Tensor,
         input_features: torch.Tensor,
         concepts_pred_probs: torch.Tensor,
-    ):
+    ) -> torch.Tensor:
+        # concepts_mask, 1 means intervened.
         if self.concept_learning == "soft":
             return self._intervene_soft(concepts_interv_probs)
 
@@ -379,13 +380,19 @@ class CBM(nn.Module):
         weight = torch.ones((c.shape[0], self.num_monte_carlo), device=c.device)
         return self._predict_intervention_target(c, weight)
 
-    def _intervene_ar(self, concepts_interv_probs, concepts_mask, concepts_pred_probs):
-        # Here, concepts_interv_probs are already the hard, MCMC sampled concepts as determined by the intervene_ar function
-        id = torch.nonzero(concepts_interv_probs * concepts_mask == 1, as_tuple=False)
+    def _intervene_ar(
+        self,
+        concepts_interv_probs: torch.Tensor,
+        concepts_mask: torch.Tensor,
+        concepts_pred_probs: torch.Tensor,
+    ) -> torch.Tensor:
+        # Here, concepts_interv_probs are already the hard
+        # MCMC sampled concepts as determined by the intervene_ar function
+        idx = torch.nonzero(concepts_interv_probs * concepts_mask == 1, as_tuple=False)
         weight_k = torch.log(1 - concepts_pred_probs + 1e-6)  # If intervened-on concepts have value 0
         weight_k.index_put_(
-            list(id.t()),
-            torch.log(concepts_pred_probs + 1e-6)[id[:, 0], id[:, 1], id[:, 2]],
+            list(idx.t()),
+            torch.log(concepts_pred_probs + 1e-6)[idx[:, 0], idx[:, 1], idx[:, 2]],
             accumulate=False,
         )  # If intervened-on concepts have value 1
         weight_k = weight_k * concepts_mask  # Only compute weight for intervened-on concepts
@@ -395,7 +402,7 @@ class CBM(nn.Module):
         )  # Replicating their implementation (from log to prob space)
         return self._predict_intervention_target(concepts_interv_probs, weight)
 
-    def _predict_intervention_target(self, c, weight):
+    def _predict_intervention_target(self, c: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         y_pred_probs_i = 0
         for i in range(self.num_monte_carlo):
             c_i = c[:, :, i]
@@ -409,7 +416,9 @@ class CBM(nn.Module):
             return torch.logit(y_pred_probs, eps=1e-6)
         return torch.log(y_pred_probs + 1e-6)
 
-    def _intervene_cem(self, concepts_interv_probs, input_features):
+    def _intervene_cem(
+        self, concepts_interv_probs: torch.Tensor, input_features: torch.Tensor
+    ) -> torch.Tensor:
         intermediate = self.encoder(input_features)
         c_p = [p(intermediate) for p in self.positive_embeddings]
         c_n = [n(intermediate) for n in self.negative_embeddings]
@@ -421,7 +430,9 @@ class CBM(nn.Module):
         z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
         return self.head(z_prob)
 
-    def intervene_ar(self, concepts_true, concepts_mask, input_features):
+    def intervene_ar(
+        self, concepts_true: torch.Tensor, concepts_mask: torch.Tensor, input_features: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Perform an intervention on the Autoregressive CBM.
 
@@ -443,6 +454,8 @@ class CBM(nn.Module):
         # Concept predictions for autoregressive model. Intervened-on concepts are fixed to ground truth
         intermediate = self.encoder(input_features)
         c_prob, c_hard = [], []
+
+        assert isinstance(self.concept_predictor, nn.ModuleList)
         for j, (predictor) in enumerate(self.concept_predictor):
             if c_prob:
                 concept = []
@@ -477,18 +490,18 @@ class CBM(nn.Module):
         c = torch.cat([c_hard[i] for i in range(self.num_concepts)], dim=1)
         return c_prob, c
 
-    def compute_temperature(self, epoch, device):
-        final_temp = torch.tensor([0.5], device=device)
-        init_temp = torch.tensor([1.0], device=device)
+    def compute_temperature(self, epoch: int) -> float:
+        final_temp = 0.5
+        init_temp = 1.0
         rate = (math.log(final_temp) - math.log(init_temp)) / float(self.num_epochs)
         curr_temp = max(init_temp * math.exp(rate * epoch), final_temp)
         self.curr_temp = curr_temp
         return curr_temp
 
-    def freeze_c(self):
+    def freeze_c(self) -> None:
         self.head.apply(freeze_module)
 
-    def freeze_t(self):
+    def freeze_t(self) -> None:
         self.head.apply(unfreeze_module)
         self.encoder.apply(freeze_module)
         self.concept_predictor.apply(freeze_module)
