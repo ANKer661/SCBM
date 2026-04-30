@@ -5,7 +5,9 @@ The runner coordinates setup and stage execution. Model-specific batch behavior
 lives in training.adapters, while the epoch loops live in training.epoch.
 """
 
+from __future__ import annotations
 import time
+import typing
 import uuid
 from os.path import join
 from pathlib import Path
@@ -24,16 +26,23 @@ from utils.data import get_concept_groups, get_empirical_covariance
 from utils.training import Custom_Metrics, freeze_module
 from utils.utils import reset_random_seeds
 
+if typing.TYPE_CHECKING:
+    from torch.utils.data import DataLoader
+    from typing import Callable
+    from training.adapters import CBMAdapter, SCBMAdapter
+    from training.stages import TrainingStage
+    from torchmetrics import Metric
+
 
 class ExperimentRunner:
     """Coordinate setup, training, evaluation, and teardown for one experiment."""
 
-    def __init__(self, config):
+    def __init__(self, config) -> None:
         self.config = config
         self.device = None
         self.experiment_path = None
 
-    def run(self):
+    def run(self) -> None:
         gen = reset_random_seeds(self.config.seed)
         self.device = self._setup_device()
         self.experiment_path = self._setup_experiment_path()
@@ -48,9 +57,7 @@ class ExperimentRunner:
         model = self._setup_model(train_loader)
         loss_fn = create_loss(self.config)
         adapter = create_adapter(model, loss_fn, self.config)
-        metrics = Custom_Metrics(self.config.data.num_concepts, self.device).to(
-            self.device
-        )
+        metrics = Custom_Metrics(self.config.data.num_concepts, self.device).to(self.device)
 
         print(
             "TRAINING "
@@ -105,7 +112,7 @@ class ExperimentRunner:
         finish_wandb()
         return None
 
-    def _setup_device(self):
+    def _setup_device(self) -> torch.device:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if device.type == "cuda":
             print("Using", torch.cuda.get_device_name(0))
@@ -113,7 +120,7 @@ class ExperimentRunner:
             print("No GPU available")
         return device
 
-    def _setup_experiment_path(self):
+    def _setup_experiment_path(self) -> Path:
         timestr = time.strftime("%Y%m%d-%H%M%S")
         ex_name = "{}_{}".format(str(timestr), uuid.uuid4().hex[:5])
         experiment_path = (
@@ -127,12 +134,10 @@ class ExperimentRunner:
         print("Experiment path: ", experiment_path)
         return experiment_path
 
-    def _setup_model(self, train_loader):
+    def _setup_model(self, train_loader: DataLoader) -> torch.nn.Module:
         model = create_model(self.config)
         if self.config.model.get("cov_type") == "empirical":
-            model.sigma_concepts = get_empirical_covariance(train_loader).to(
-                self.device
-            )
+            model.sigma_concepts = get_empirical_covariance(train_loader).to(self.device)
         elif self.config.model.get("cov_type") == "global":
             lower_triangle = get_empirical_covariance(train_loader).to(self.device)
             rows, cols = torch.tril_indices(
@@ -150,20 +155,23 @@ class ExperimentRunner:
         model.to(self.device)
         return model
 
-    def _select_intervention_function(self):
+    def _select_intervention_function(self) -> Callable:
         from utils.intervention import intervene_cbm, intervene_scbm
 
         if self.config.model.model == "cbm":
             return intervene_cbm
-        return intervene_scbm
+        elif self.config.model.model == "scbm":
+            return intervene_scbm
+
+        raise ValueError(f"Intervention not implemented for model {self.config.model.model}")
 
     def _run_training(
         self,
-        adapter,
-        train_loader,
-        val_loader,
-        metrics,
-    ):
+        adapter: SCBMAdapter | CBMAdapter,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        metrics: Metric,
+    ) -> int:
         stages = build_stage_plan(self.config)
         for stage in stages:
             self._run_stage(
@@ -177,12 +185,12 @@ class ExperimentRunner:
 
     def _run_stage(
         self,
-        stage,
-        adapter,
-        train_loader,
-        val_loader,
-        metrics,
-    ):
+        stage: TrainingStage,
+        adapter: SCBMAdapter | CBMAdapter,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        metrics: Metric,
+    ) -> None:
         print(stage.message)
         apply_freeze_policy(adapter.model, stage.freeze_policy)
 
