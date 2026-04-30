@@ -223,44 +223,33 @@ class CBM(nn.Module):
             f"Undefined behavior for Autoregressive CBM with {self.training_mode = } and {validation = }."
         )
 
-    def _forward_ar_validation(self, intermediate: torch.Tensor):
-        c_prob, c_hard = [], []
+    def _forward_ar_validation(self, intermediate: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         assert isinstance(self.concept_predictor, nn.ModuleList)
-        for predictor in self.concept_predictor:
-            if c_prob:
-                previous_concepts = torch.cat(c_hard, dim=1).permute(
-                    0, 2, 1
-                )  # (B, num_monte_carlo, num_concepts_so_far)
-                expanded_intermediate = intermediate.unsqueeze(1).expand(
-                    -1, self.num_monte_carlo, -1
-                )  # (B, num_monte_carlo, n_concepts)
-                concept_input = torch.cat(
-                    [expanded_intermediate, previous_concepts], dim=2
-                )  # (B, num_monte_carlo, n_concepts + num_concepts_so_far)
-                batch_size = concept_input.size(0)
-                concept = self.act_c(
-                    predictor(concept_input.reshape(batch_size * self.num_monte_carlo, -1))
-                ).view(batch_size, self.num_monte_carlo)  # (B, num_monte_carlo)
-                c_relaxed = torch.bernoulli(concept)[:, None, :]  # (B, 1, num_monte_carlo)
-                concept = concept[:, None, :]  # (B, 1, num_monte_carlo)
-                concept_hard = c_relaxed
 
-            else:
-                concept_input = intermediate  # (B, n_concepts)
-                concept = self.act_c(predictor(concept_input))  # (B, 1)
-                concept = concept.unsqueeze(-1).expand(
-                    -1, -1, self.num_monte_carlo
-                )  # (B, 1, num_monte_carlo)
-                c_relaxed = torch.bernoulli(concept)  # (B, 1, num_monte_carlo)
-                concept_hard = c_relaxed  # (B, 1, num_monte_carlo)
+        first_predictor = self.concept_predictor[0]
+        concept = self.act_c(first_predictor(intermediate))  # (B, 1)
+        concept = concept.unsqueeze(-1).expand(-1, -1, self.num_monte_carlo)  # (B, 1, num_monte_carlo)
+        c = torch.bernoulli(concept)  # (B, 1, num_monte_carlo)
+        c_prob = [concept]
+
+        B = concept.size(0)
+        expanded_intermediate = intermediate.unsqueeze(1).expand(
+            -1, self.num_monte_carlo, -1
+        )  # (B, num_monte_carlo, n_features)
+        for predictor in self.concept_predictor[1:]:
+            previous_concepts = c.permute(0, 2, 1)  # (B, num_monte_carlo, num_concepts_so_far)
+            concept_input = torch.cat(
+                [expanded_intermediate, previous_concepts], dim=2
+            )  # (B, num_monte_carlo, n_features + num_concepts_so_far)
+            concept = self.act_c(predictor(concept_input.reshape(B * self.num_monte_carlo, -1))).view(
+                B, self.num_monte_carlo
+            )  # (B, num_monte_carlo)
+            concept = concept.unsqueeze(1)  # (B, 1, num_monte_carlo)
+            concept_hard = torch.bernoulli(concept)  # (B, 1, num_monte_carlo)
             c_prob.append(concept)
-            c_hard.append(concept_hard)
-        c_prob = torch.cat(
-            [c_prob[i] for i in range(self.num_concepts)], dim=1
-        )  # (B, num_concepts, num_monte_carlo)
-        c = torch.cat(
-            [c_hard[i] for i in range(self.num_concepts)], dim=1
-        )  # (B, num_concepts, num_monte_carlo)
+            c = torch.cat([c, concept_hard], dim=1)  # (B, num_concepts_so_far + 1, num_monte_carlo)
+
+        c_prob = torch.cat(c_prob, dim=1)  # (B, num_concepts, num_monte_carlo)
         return c_prob, c
 
     def _forward_ar_concepts_training(
