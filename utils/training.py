@@ -1,5 +1,17 @@
 """
-Utility functions for training.
+Legacy training utilities.
+
+The staged training path has been refactored into:
+- `training/runner.py` for experiment orchestration.
+- `training/stages.py` for stage planning and freeze policy.
+- `training/epoch.py` for generic train/validation loops.
+- `training/adapters.py` for model-specific batch behavior.
+- `training/optim.py` for optimizer/scheduler construction.
+- `training/metrics.py` for `Custom_Metrics`.
+- `training/freezing.py` for freeze/unfreeze helpers.
+
+This module is kept for compatibility with the original training functions and
+older imports. New staged-training code should import from `training.*`.
 """
 
 import numpy as np
@@ -11,7 +23,6 @@ from torchmetrics import Metric
 import wandb
 
 from utils.metrics import calc_target_metrics, calc_concept_metrics
-from utils.plotting import compute_and_plot_heatmap
 
 
 def train_one_epoch_scbm(
@@ -272,8 +283,10 @@ def validate_one_epoch_scbm(
             # Compute covariance matrix of concepts
             cov = torch.matmul(triang_cov, torch.transpose(triang_cov, dim0=1, dim1=2))
 
-            if test and k % (len(loader) // 10) == 0:
+            if test and k % max(1, len(loader) // 10) == 0:
                 try:
+                    from utils.plotting import compute_and_plot_heatmap
+
                     corr = (cov[0] / cov[0].diag().sqrt()).transpose(
                         dim0=0, dim1=1
                     ) / cov[0].diag().sqrt()

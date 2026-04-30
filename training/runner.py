@@ -19,11 +19,12 @@ from models.factory import create_model
 from datasets.datamodule import build_dataloaders
 from training.adapters import create_adapter
 from training.epoch import train_one_epoch, validate_one_epoch
+from training.freezing import freeze_module
 from training.logging import finish_wandb, setup_wandb
+from training.metrics import Custom_Metrics
 from training.optim import build_optimizer, build_scheduler
 from training.stages import apply_freeze_policy, apply_stage_cleanup, build_stage_plan
 from utils.data import get_concept_groups, get_empirical_covariance
-from utils.training import Custom_Metrics, freeze_module
 from utils.utils import reset_random_seeds
 
 if typing.TYPE_CHECKING:
@@ -32,12 +33,13 @@ if typing.TYPE_CHECKING:
     from training.adapters import CBMAdapter, SCBMAdapter
     from training.stages import TrainingStage
     from torchmetrics import Metric
+    from omegaconf import DictConfig
 
 
 class ExperimentRunner:
     """Coordinate setup, training, evaluation, and teardown for one experiment."""
 
-    def __init__(self, config) -> None:
+    def __init__(self, config: DictConfig) -> None:
         self.config = config
         self.device = None
         self.experiment_path = None

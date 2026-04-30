@@ -12,7 +12,7 @@ from training.runner import ExperimentRunner
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
-def main(config: DictConfig):
+def main(config: DictConfig) -> None:
     project_dir = Path(__file__).absolute().parent
     print("Project directory:", project_dir)
     print("Config:", config)
