@@ -30,7 +30,7 @@ class CBM(nn.Module):
         curr_temp (float): The current temperature for the Gumbel-Softmax distribution.
     """
 
-    def __init__(self, config):
+    def __init__(self, config) -> None:
         super(CBM, self).__init__()
 
         # Configuration arguments
@@ -59,7 +59,9 @@ class CBM(nn.Module):
             self.encoder_res = encoder_res
         if self.concept_learning == "embedding":
             print(
-                "Please be aware that our implementation of CEMs is without training on interventions! This is because we would deem this an unfair comparison to our method that is also not trained on interventions. Still, be careful when using this CEM code for derivative works"
+                "Please be aware that our implementation of CEMs is without training on interventions! "
+                "This is because we would deem this an unfair comparison to our method that is also not "
+                "trained on interventions. Still, be careful when using this CEM code for derivative works"
             )
             self.positive_embeddings = nn.ModuleList(
                 [
@@ -97,9 +99,7 @@ class CBM(nn.Module):
                 )
 
             else:
-                self.concept_predictor = nn.Linear(
-                    n_features, self.num_concepts, bias=True
-                )
+                self.concept_predictor = nn.Linear(n_features, self.num_concepts, bias=True)
             self.concept_dim = self.num_concepts
 
         # Assume binary concepts
@@ -138,132 +138,146 @@ class CBM(nn.Module):
             tuple: A tuple containing:
                 - c_prob (torch.Tensor): Predicted concept probabilities. Shape: (batch_size, num_concepts)
                 - y_pred_logits (torch.Tensor): Logits for the target variable. Shape: (batch_size, label_dim)
-                - c (torch.Tensor): Predicted hard concept values (if method permits, otherwise the concept representation). Shape: (batch_size, num_concepts, num_monte_carlo) for MCMC sampling or (batch_size, num_concepts) otherwise.
+                - c (torch.Tensor): Predicted hard concept values (if method permits, otherwise the concept representation). 
+                    Shape: (batch_size, num_concepts, num_monte_carlo) for MCMC sampling or (batch_size, num_concepts) otherwise.
         """
 
-        # Get intermediate representations
         intermediate = self.encoder(x)
+        c_logit = None
 
-        # Get concept predictions
-        if self.concept_learning in ("hard", "soft"):
-            # CBM
-            c_logit = self.concept_predictor(intermediate)
-            c_prob = self.act_c(c_logit)
-
-            if self.concept_learning in ("hard"):
-                # Hard CBM
-                if self.training_mode == "sequential" or validation:
-                    # Sample from Bernoulli M times, as we don't need to backprop
-                    c_prob_mcmc = c_prob.unsqueeze(-1).expand(
-                        -1, -1, self.num_monte_carlo
-                    )
-                    c = torch.bernoulli(c_prob_mcmc)
-
-                # Relax bernoulli sampling with Gumbel Softmax to allow for backpropagation
-                elif self.training_mode == "joint":
-                    curr_temp = self.compute_temperature(epoch, device=c_prob.device)
-                    dist = RelaxedBernoulli(temperature=curr_temp, probs=c_prob)
-                    c_relaxed = dist.rsample([self.num_monte_carlo]).movedim(0, -1)
-                    if self.straight_through:
-                        # Straight-Through Gumbel Softmax
-                        c_hard = (c_relaxed > 0.5) * 1
-                        c = c_hard - c_relaxed.detach() + c_relaxed
-                    else:
-                        # Reparametrization trick.
-                        c = c_relaxed
-
-                else:
-                    raise NotImplementedError
-
+        if self.concept_learning == "hard":
+            c_prob, c = self._forward_hard(intermediate, epoch, validation)
+        elif self.concept_learning == "soft":
+            c_prob, c, c_logit = self._forward_soft(intermediate)
         elif self.concept_learning == "autoregressive":
-            # AR
-            if validation:
-                c_prob, c_hard = [], []
-                for predictor in self.concept_predictor:
-                    if c_prob:
-                        concept = []
-                        for i in range(
-                            self.num_monte_carlo
-                        ):  # MCMC samples for evaluation and interventions, but not for training
-                            concept_input_i = torch.cat(
-                                [intermediate, torch.cat(c_hard, dim=1)[..., i]], dim=1
-                            )
-                            concept.append(self.act_c(predictor(concept_input_i)))
-                        concept = torch.cat(concept, dim=-1)
-                        c_relaxed = torch.bernoulli(concept)[:, None, :]
-                        concept = concept[:, None, :]
-                        concept_hard = c_relaxed
-
-                    else:
-                        concept_input = intermediate
-                        concept = self.act_c(predictor(concept_input))
-                        concept = concept.unsqueeze(-1).expand(
-                            -1, -1, self.num_monte_carlo
-                        )
-                        c_relaxed = torch.bernoulli(concept)
-                        concept_hard = c_relaxed
-                    c_prob.append(concept)
-                    c_hard.append(concept_hard)
-                c_prob = torch.cat([c_prob[i] for i in range(self.num_concepts)], dim=1)
-                c = torch.cat([c_hard[i] for i in range(self.num_concepts)], dim=1)
-
-            elif self.training_mode == "independent":
-                # Training
-                if c_true is None and concepts_train_ar is not False:
-                    c_prob, c_hard = [], []
-                    for c_idx, predictor in enumerate(self.concept_predictor):
-                        if c_hard:
-                            concept_input = torch.cat(
-                                [intermediate, concepts_train_ar[:, :c_idx]], dim=1
-                            )
-                        else:
-                            concept_input = intermediate
-                        concept = self.act_c(predictor(concept_input))
-
-                        # No Gumbel softmax because backprop can happen through the input connection
-                        c_relaxed = torch.bernoulli(concept)
-                        concept_hard = c_relaxed
-
-                        # NOTE that the following train-time variables are overly good because they are taking ground truth as input. At validation time, we sample
-                        c_prob.append(concept)
-                        c_hard.append(concept_hard)
-                    c_prob = torch.cat(
-                        [c_prob[i] for i in range(self.num_concepts)], dim=1
-                    )
-                    c = torch.cat([c_hard[i] for i in range(self.num_concepts)], dim=1)
-
-                else:  # Training the head with the GT concepts as input
-                    c_prob = c_true.float()
-                    c = c_true.float()
-
-            else:
-                raise NotImplementedError
-
+            c_prob, c = self._forward_ar(intermediate, c_true, concepts_train_ar, validation)
         elif self.concept_learning == "embedding":
-            # CEM
-            if self.training_mode == "joint":
-                # Obtaining concept embeddings
-                c_p = [p(intermediate) for p in self.positive_embeddings]
-                c_n = [n(intermediate) for n in self.negative_embeddings]
+            c_prob, c = self._forward_cem(intermediate)
+        else:
+            raise NotImplementedError
 
-                # Concept probabilities from scoring function
-                c_prob = [
-                    self.scoring_function(torch.cat((c_p[i], c_n[i]), dim=1))
-                    for i in range(self.num_concepts)
-                ]
+        y_pred_logits = self._predict_target(c_prob, c, c_logit, validation)
+        return c_prob, y_pred_logits, c
 
-                # Final concept embedding
-                z_prob = [
-                    c_prob[i] * c_p[i] + (1 - c_prob[i]) * c_n[i]
-                    for i in range(self.num_concepts)
-                ]
-                z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
-                c_prob = torch.cat([c_prob[i] for i in range(self.num_concepts)], dim=1)
-                c = z_prob
+    def _forward_hard(self, intermediate, epoch, validation):
+        c_logit = self.concept_predictor(intermediate)
+        c_prob = self.act_c(c_logit)
+
+        if self.training_mode == "sequential" or validation:
+            # Sample from Bernoulli M times, as we don't need to backprop
+            c_prob_mcmc = c_prob.unsqueeze(-1).expand(-1, -1, self.num_monte_carlo)
+            c = torch.bernoulli(c_prob_mcmc)
+
+        # Relax bernoulli sampling with Gumbel Softmax to allow for backpropagation
+        elif self.training_mode == "joint":
+            curr_temp = self.compute_temperature(epoch, device=c_prob.device)
+            dist = RelaxedBernoulli(temperature=curr_temp, probs=c_prob)
+            c_relaxed = dist.rsample([self.num_monte_carlo]).movedim(0, -1)
+            if self.straight_through:
+                # Straight-Through Gumbel Softmax
+                c_hard = (c_relaxed > 0.5) * 1
+                c = c_hard - c_relaxed.detach() + c_relaxed
             else:
-                raise Exception("CEMs are trained jointly, change training mode")
+                # Reparametrization trick.
+                c = c_relaxed
 
-        # Get predicted targets
+        else:
+            raise NotImplementedError
+
+        return c_prob, c
+
+    def _forward_soft(self, intermediate):
+        c_logit = self.concept_predictor(intermediate)
+        c_prob = self.act_c(c_logit)
+        c = torch.empty_like(c_prob)
+        return c_prob, c, c_logit
+
+    def _forward_ar(self, intermediate, c_true, concepts_train_ar, validation):
+        if validation:
+            return self._forward_ar_validation(intermediate)
+
+        if self.training_mode == "independent":
+            # Training
+            if c_true is None and concepts_train_ar is not False:
+                return self._forward_ar_concepts_training(intermediate, concepts_train_ar)
+
+            # Training the head with the GT concepts as input
+            c_prob = c_true.float()
+            c = c_true.float()
+            return c_prob, c
+
+        raise NotImplementedError
+
+    def _forward_ar_validation(self, intermediate):
+        c_prob, c_hard = [], []
+        for predictor in self.concept_predictor:
+            if c_prob:
+                concept = []
+                for i in range(
+                    self.num_monte_carlo
+                ):  # MCMC samples for evaluation and interventions, but not for training
+                    concept_input_i = torch.cat(
+                        [intermediate, torch.cat(c_hard, dim=1)[..., i]], dim=1
+                    )
+                    concept.append(self.act_c(predictor(concept_input_i)))
+                concept = torch.cat(concept, dim=-1)
+                c_relaxed = torch.bernoulli(concept)[:, None, :]
+                concept = concept[:, None, :]
+                concept_hard = c_relaxed
+
+            else:
+                concept_input = intermediate
+                concept = self.act_c(predictor(concept_input))
+                concept = concept.unsqueeze(-1).expand(-1, -1, self.num_monte_carlo)
+                c_relaxed = torch.bernoulli(concept)
+                concept_hard = c_relaxed
+            c_prob.append(concept)
+            c_hard.append(concept_hard)
+        c_prob = torch.cat([c_prob[i] for i in range(self.num_concepts)], dim=1)
+        c = torch.cat([c_hard[i] for i in range(self.num_concepts)], dim=1)
+        return c_prob, c
+
+    def _forward_ar_concepts_training(self, intermediate, concepts_train_ar):
+        c_prob, c_hard = [], []
+        for c_idx, predictor in enumerate(self.concept_predictor):
+            if c_hard:
+                concept_input = torch.cat([intermediate, concepts_train_ar[:, :c_idx]], dim=1)
+            else:
+                concept_input = intermediate
+            concept = self.act_c(predictor(concept_input))
+
+            # No Gumbel softmax because backprop can happen through the input connection
+            c_relaxed = torch.bernoulli(concept)
+            concept_hard = c_relaxed
+
+            # NOTE that the following train-time variables are overly good because they are taking ground truth as input. At validation time, we sample
+            c_prob.append(concept)
+            c_hard.append(concept_hard)
+        c_prob = torch.cat([c_prob[i] for i in range(self.num_concepts)], dim=1)
+        c = torch.cat([c_hard[i] for i in range(self.num_concepts)], dim=1)
+        return c_prob, c
+
+    def _forward_cem(self, intermediate):
+        if self.training_mode != "joint":
+            raise Exception("CEMs are trained jointly, change training mode")
+
+        # Obtaining concept embeddings
+        c_p = [p(intermediate) for p in self.positive_embeddings]
+        c_n = [n(intermediate) for n in self.negative_embeddings]
+
+        # Concept probabilities from scoring function
+        c_prob = [
+            self.scoring_function(torch.cat((c_p[i], c_n[i]), dim=1)) for i in range(self.num_concepts)
+        ]
+
+        # Final concept embedding
+        z_prob = [c_prob[i] * c_p[i] + (1 - c_prob[i]) * c_n[i] for i in range(self.num_concepts)]
+        z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
+        c_prob = torch.cat([c_prob[i] for i in range(self.num_concepts)], dim=1)
+        c = z_prob
+        return c_prob, c
+
+    def _predict_target(self, c_prob, c, c_logit, validation):
         if self.concept_learning == "hard" or (
             self.concept_learning == "autoregressive" and validation
         ):
@@ -289,7 +303,6 @@ class CBM(nn.Module):
             y_pred_logits = self.head(
                 c_logit
             )  # NOTE that we're passing logits not probs in soft case as is also done by Koh et al.
-            c = torch.empty_like(c_prob)
 
         elif self.concept_learning == "embedding" or (
             self.concept_learning == "autoregressive" and not validation
@@ -298,7 +311,7 @@ class CBM(nn.Module):
             # If CEM: c are predicte embeddings, if AR: c are ground truth concepts
             y_pred_logits = self.head(c)
 
-        return c_prob, y_pred_logits, c
+        return y_pred_logits
 
     def intervene(
         self,
@@ -308,84 +321,75 @@ class CBM(nn.Module):
         concepts_pred_probs,
     ):
         if self.concept_learning == "soft":
-            # Soft CBM
-            c_logit = torch.logit(concepts_interv_probs, eps=1e-6)
-            y_pred_logits = self.head(c_logit)
+            return self._intervene_soft(concepts_interv_probs)
 
-        elif self.concept_learning in ("hard", "autoregressive"):
-            # Hard CBM or AR
-            y_pred_probs_i = 0
+        if self.concept_learning == "hard":
+            return self._intervene_hard(concepts_interv_probs, concepts_mask)
 
-            if self.concept_learning == "hard":
-                c_prob_mcmc = concepts_interv_probs.unsqueeze(-1).expand(
-                    -1, -1, self.num_monte_carlo
-                )
-                c = torch.bernoulli(c_prob_mcmc)
+        if self.concept_learning == "autoregressive":
+            return self._intervene_ar(concepts_interv_probs, concepts_mask, concepts_pred_probs)
 
-                # Fix intervened-on concepts to ground truth
-                c[concepts_mask == 1] = (
-                    concepts_interv_probs[concepts_mask == 1]
-                    .unsqueeze(-1)
-                    .expand(-1, self.num_monte_carlo)
-                )
-                weight = torch.ones((c.shape[0], self.num_monte_carlo), device=c.device)
+        if self.concept_learning == "embedding":
+            return self._intervene_cem(concepts_interv_probs, input_features)
 
-            elif self.concept_learning == "autoregressive":
-                # Note: Here, concepts_interv_probs are already the hard, MCMC sampled concepts as determined by the intervene_ar function
-                id = torch.nonzero(
-                    concepts_interv_probs * concepts_mask == 1, as_tuple=False
-                )
-                weight_k = torch.log(
-                    1 - concepts_pred_probs + 1e-6
-                )  # If intervened-on concepts have value 0
-                weight_k.index_put_(
-                    list(id.t()),
-                    torch.log(concepts_pred_probs + 1e-6)[id[:, 0], id[:, 1], id[:, 2]],
-                    accumulate=False,
-                )  # If intervened-on concepts have value 1
-                weight_k = (
-                    weight_k * concepts_mask
-                )  # Only compute weight for intervened-on concepts
-                weight = torch.sum(weight_k, dim=(1))  # Sum over concepts
-                weight = torch.softmax(
-                    weight, dim=-1
-                )  # Replicating their implementation (from log to prob space)
-                c = concepts_interv_probs
+        raise NotImplementedError
 
-            for i in range(self.num_monte_carlo):
-                c_i = c[:, :, i]
-                y_pred_logits_i = self.head(c_i)
-                if self.pred_dim == 1:
-                    y_pred_probs_i += weight[:, i].unsqueeze(1) * torch.sigmoid(
-                        y_pred_logits_i
-                    )
-                else:
-                    y_pred_probs_i += weight[:, i].unsqueeze(1) * torch.softmax(
-                        y_pred_logits_i, dim=1
-                    )
-            y_pred_probs = y_pred_probs_i / torch.sum(weight, dim=1).unsqueeze(1)
+    def _intervene_soft(self, concepts_interv_probs):
+        c_logit = torch.logit(concepts_interv_probs, eps=1e-6)
+        return self.head(c_logit)
+
+    def _intervene_hard(self, concepts_interv_probs, concepts_mask):
+        c_prob_mcmc = concepts_interv_probs.unsqueeze(-1).expand(-1, -1, self.num_monte_carlo)
+        c = torch.bernoulli(c_prob_mcmc)
+
+        # Fix intervened-on concepts to ground truth
+        c[concepts_mask == 1] = (
+            concepts_interv_probs[concepts_mask == 1].unsqueeze(-1).expand(-1, self.num_monte_carlo)
+        )
+        weight = torch.ones((c.shape[0], self.num_monte_carlo), device=c.device)
+        return self._predict_intervention_target(c, weight)
+
+    def _intervene_ar(self, concepts_interv_probs, concepts_mask, concepts_pred_probs):
+        # Here, concepts_interv_probs are already the hard, MCMC sampled concepts as determined by the intervene_ar function
+        id = torch.nonzero(concepts_interv_probs * concepts_mask == 1, as_tuple=False)
+        weight_k = torch.log(1 - concepts_pred_probs + 1e-6)  # If intervened-on concepts have value 0
+        weight_k.index_put_(
+            list(id.t()),
+            torch.log(concepts_pred_probs + 1e-6)[id[:, 0], id[:, 1], id[:, 2]],
+            accumulate=False,
+        )  # If intervened-on concepts have value 1
+        weight_k = weight_k * concepts_mask  # Only compute weight for intervened-on concepts
+        weight = torch.sum(weight_k, dim=(1))  # Sum over concepts
+        weight = torch.softmax(
+            weight, dim=-1
+        )  # Replicating their implementation (from log to prob space)
+        return self._predict_intervention_target(concepts_interv_probs, weight)
+
+    def _predict_intervention_target(self, c, weight):
+        y_pred_probs_i = 0
+        for i in range(self.num_monte_carlo):
+            c_i = c[:, :, i]
+            y_pred_logits_i = self.head(c_i)
             if self.pred_dim == 1:
-                y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
+                y_pred_probs_i += weight[:, i].unsqueeze(1) * torch.sigmoid(y_pred_logits_i)
             else:
-                y_pred_logits = torch.log(y_pred_probs + 1e-6)
+                y_pred_probs_i += weight[:, i].unsqueeze(1) * torch.softmax(y_pred_logits_i, dim=1)
+        y_pred_probs = y_pred_probs_i / torch.sum(weight, dim=1).unsqueeze(1)
+        if self.pred_dim == 1:
+            return torch.logit(y_pred_probs, eps=1e-6)
+        return torch.log(y_pred_probs + 1e-6)
 
-        elif self.concept_learning == "embedding":
-            # CEM
-            # Get intermediate representations
-            intermediate = self.encoder(input_features)
-            # Obtaining concept embeddings
-            c_p = [p(intermediate) for p in self.positive_embeddings]
-            c_n = [n(intermediate) for n in self.negative_embeddings]
-            # Final concept embedding
-            z_prob = [
-                concepts_interv_probs[:, i].unsqueeze(1) * c_p[i]
-                + (1 - concepts_interv_probs[:, i].unsqueeze(1)) * c_n[i]
-                for i in range(self.num_concepts)
-            ]
-            z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
-            y_pred_logits = self.head(z_prob)
-
-        return y_pred_logits
+    def _intervene_cem(self, concepts_interv_probs, input_features):
+        intermediate = self.encoder(input_features)
+        c_p = [p(intermediate) for p in self.positive_embeddings]
+        c_n = [n(intermediate) for n in self.negative_embeddings]
+        z_prob = [
+            concepts_interv_probs[:, i].unsqueeze(1) * c_p[i]
+            + (1 - concepts_interv_probs[:, i].unsqueeze(1)) * c_n[i]
+            for i in range(self.num_concepts)
+        ]
+        z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
+        return self.head(z_prob)
 
     def intervene_ar(self, concepts_true, concepts_mask, input_features):
         """
@@ -430,13 +434,11 @@ class CBM(nn.Module):
 
             concept_hard = (
                 concept_hard * (1 - concepts_mask[:, j, :])[:, None, :]
-                + concepts_mask[:, j, :][:, None, :]
-                * concepts_true[:, j, :][:, None, :]
+                + concepts_mask[:, j, :][:, None, :] * concepts_true[:, j, :][:, None, :]
             )  # Only update if it is not an intervened on
             concept = (
                 concept * (1 - concepts_mask[:, j, :][:, None, :])
-                + concepts_mask[:, j, :][:, None, :]
-                * concepts_true[:, j, :][:, None, :]
+                + concepts_mask[:, j, :][:, None, :] * concepts_true[:, j, :][:, None, :]
             )
 
             c_prob.append(concept)
