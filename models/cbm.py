@@ -97,8 +97,7 @@ class CBM(nn.Module):
                         for i in range(self.num_concepts)
                     ]
                 )
-
-            else:
+            else:  # Hard or Soft CBM
                 self.concept_predictor = nn.Linear(n_features, self.num_concepts, bias=True)
             self.concept_dim = self.num_concepts
 
@@ -115,12 +114,12 @@ class CBM(nn.Module):
 
     def forward(
         self,
-        x,
-        epoch,
-        c_true=None,
-        validation=False,
-        concepts_train_ar=False,
-    ):
+        x: torch.Tensor,
+        epoch: int,
+        c_true: torch.Tensor | None = None,
+        validation: bool = False,
+        concepts_train_ar: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Perform a forward pass through one of the baselines.
 
@@ -132,13 +131,13 @@ class CBM(nn.Module):
             epoch (int): The current epoch number.
             c_true (torch.Tensor, optional): The ground-truth concept values. Required for "independent" training mode. Default is None.
             validation (bool, optional): Flag indicating whether this is a validation pass. Default is False.
-            concepts_train_ar (torch.Tensor, optional): Ground-truth concept values for autoregressive training. Default is False.
+            concepts_train_ar (torch.Tensor, optional): Ground-truth concept values for autoregressive training. Default is None.
 
         Returns:
             tuple: A tuple containing:
                 - c_prob (torch.Tensor): Predicted concept probabilities. Shape: (batch_size, num_concepts)
                 - y_pred_logits (torch.Tensor): Logits for the target variable. Shape: (batch_size, label_dim)
-                - c (torch.Tensor): Predicted hard concept values (if method permits, otherwise the concept representation). 
+                - c (torch.Tensor): Predicted hard concept values (if method permits, otherwise the concept representation).
                     Shape: (batch_size, num_concepts, num_monte_carlo) for MCMC sampling or (batch_size, num_concepts) otherwise.
         """
 
@@ -154,12 +153,12 @@ class CBM(nn.Module):
         elif self.concept_learning == "embedding":
             c_prob, c = self._forward_cem(intermediate)
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"concept learning method {self.concept_learning} not supported")
 
-        y_pred_logits = self._predict_target(c_prob, c, c_logit, validation)
+        y_pred_logits = self._predict_target(c, c_logit, validation)
         return c_prob, y_pred_logits, c
 
-    def _forward_hard(self, intermediate, epoch, validation):
+    def _forward_hard(self, intermediate: torch.Tensor, epoch: int, validation: bool):
         c_logit = self.concept_predictor(intermediate)
         c_prob = self.act_c(c_logit)
 
@@ -182,34 +181,51 @@ class CBM(nn.Module):
                 c = c_relaxed
 
         else:
-            raise NotImplementedError
+            raise ValueError(f"unsupported training mode {self.training_mode} for hard CBM")
 
         return c_prob, c
 
-    def _forward_soft(self, intermediate):
+    def _forward_soft(
+        self, intermediate: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         c_logit = self.concept_predictor(intermediate)
         c_prob = self.act_c(c_logit)
         c = torch.empty_like(c_prob)
         return c_prob, c, c_logit
 
-    def _forward_ar(self, intermediate, c_true, concepts_train_ar, validation):
+    def _forward_ar(
+        self,
+        intermediate: torch.Tensor,
+        c_true: torch.Tensor | None,
+        concepts_train_ar: torch.Tensor | None,
+        validation: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         if validation:
             return self._forward_ar_validation(intermediate)
 
         if self.training_mode == "independent":
-            # Training
-            if c_true is None and concepts_train_ar is not False:
+            # Training the concept encoder
+            if c_true is None and concepts_train_ar is not None:
                 return self._forward_ar_concepts_training(intermediate, concepts_train_ar)
 
-            # Training the head with the GT concepts as input
-            c_prob = c_true.float()
-            c = c_true.float()
-            return c_prob, c
+            # Training the (target) head  with the GT concepts as input
+            if c_true is not None and concepts_train_ar is None:
+                c_prob = c_true.float()
+                c = c_true.float()
+                return c_prob, c
 
-        raise NotImplementedError
+            raise ValueError(
+                "For independent training of AR, either c_true or concepts_train_ar must be provided, but not both.\n"
+                f"{c_true is None = }, {concepts_train_ar is None = }"
+            )
 
-    def _forward_ar_validation(self, intermediate):
+        raise NotImplementedError(
+            f"Undefined behavior for Autoregressive CBM with {self.training_mode = } and {validation = }."
+        )
+
+    def _forward_ar_validation(self, intermediate: torch.Tensor):
         c_prob, c_hard = [], []
+        assert isinstance(self.concept_predictor, nn.ModuleList)
         for predictor in self.concept_predictor:
             if c_prob:
                 concept = []
@@ -237,8 +253,11 @@ class CBM(nn.Module):
         c = torch.cat([c_hard[i] for i in range(self.num_concepts)], dim=1)
         return c_prob, c
 
-    def _forward_ar_concepts_training(self, intermediate, concepts_train_ar):
+    def _forward_ar_concepts_training(
+        self, intermediate: torch.Tensor, concepts_train_ar: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         c_prob, c_hard = [], []
+        assert isinstance(self.concept_predictor, nn.ModuleList)
         for c_idx, predictor in enumerate(self.concept_predictor):
             if c_hard:
                 concept_input = torch.cat([intermediate, concepts_train_ar[:, :c_idx]], dim=1)
@@ -257,9 +276,9 @@ class CBM(nn.Module):
         c = torch.cat([c_hard[i] for i in range(self.num_concepts)], dim=1)
         return c_prob, c
 
-    def _forward_cem(self, intermediate):
+    def _forward_cem(self, intermediate: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if self.training_mode != "joint":
-            raise Exception("CEMs are trained jointly, change training mode")
+            raise ValueError("CEMs are trained jointly, change training mode")
 
         # Obtaining concept embeddings
         c_p = [p(intermediate) for p in self.positive_embeddings]
@@ -277,7 +296,9 @@ class CBM(nn.Module):
         c = z_prob
         return c_prob, c
 
-    def _predict_target(self, c_prob, c, c_logit, validation):
+    def _predict_target(
+        self, c: torch.Tensor, c_logit: torch.Tensor | None, validation: bool
+    ) -> torch.Tensor:
         if self.concept_learning == "hard" or (
             self.concept_learning == "autoregressive" and validation
         ):
@@ -311,14 +332,19 @@ class CBM(nn.Module):
             # If CEM: c are predicte embeddings, if AR: c are ground truth concepts
             y_pred_logits = self.head(c)
 
+        else:
+            raise NotImplementedError(
+                f"concept learning method {self.concept_learning} not supported for target prediction"
+            )
+
         return y_pred_logits
 
     def intervene(
         self,
-        concepts_interv_probs,
-        concepts_mask,
-        input_features,
-        concepts_pred_probs,
+        concepts_interv_probs: torch.Tensor,
+        concepts_mask: torch.Tensor,
+        input_features: torch.Tensor,
+        concepts_pred_probs: torch.Tensor,
     ):
         if self.concept_learning == "soft":
             return self._intervene_soft(concepts_interv_probs)
@@ -332,13 +358,17 @@ class CBM(nn.Module):
         if self.concept_learning == "embedding":
             return self._intervene_cem(concepts_interv_probs, input_features)
 
-        raise NotImplementedError
+        raise NotImplementedError(
+            "Unsupported concept learning method {self.concept_learning} for interventions"
+        )
 
-    def _intervene_soft(self, concepts_interv_probs):
+    def _intervene_soft(self, concepts_interv_probs: torch.Tensor) -> torch.Tensor:
         c_logit = torch.logit(concepts_interv_probs, eps=1e-6)
         return self.head(c_logit)
 
-    def _intervene_hard(self, concepts_interv_probs, concepts_mask):
+    def _intervene_hard(
+        self, concepts_interv_probs: torch.Tensor, concepts_mask: torch.Tensor
+    ) -> torch.Tensor:
         c_prob_mcmc = concepts_interv_probs.unsqueeze(-1).expand(-1, -1, self.num_monte_carlo)
         c = torch.bernoulli(c_prob_mcmc)
 
