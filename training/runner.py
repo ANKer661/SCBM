@@ -6,6 +6,7 @@ lives in training.adapters, while the epoch loops live in training.epoch.
 """
 
 from __future__ import annotations
+import os
 import time
 import typing
 import uuid
@@ -24,7 +25,7 @@ from training.logging import finish_wandb, setup_wandb
 from training.metrics import Custom_Metrics
 from training.optim import build_optimizer, build_scheduler
 from training.stages import apply_freeze_policy, apply_stage_cleanup, build_stage_plan
-from utils.data import get_concept_groups, get_empirical_covariance
+from utils.utils import numerical_stability_check
 from utils.utils import reset_random_seeds
 
 if typing.TYPE_CHECKING:
@@ -54,7 +55,7 @@ class ExperimentRunner:
         train_loader = dataloaders.train
         val_loader = dataloaders.val
         test_loader = dataloaders.test
-        concept_names_graph = get_concept_groups(self.config.data)
+        concept_names_graph = self._get_concept_groups()
 
         model = self._setup_model(train_loader)
         loss_fn = create_loss(self.config)
@@ -139,9 +140,13 @@ class ExperimentRunner:
     def _setup_model(self, train_loader: DataLoader) -> torch.nn.Module:
         model = create_model(self.config)
         if self.config.model.get("cov_type") == "empirical":
-            model.sigma_concepts = get_empirical_covariance(train_loader).to(self.device)
+            model.sigma_concepts = self._get_empirical_covariance(train_loader).to(
+                self.device
+            )
         elif self.config.model.get("cov_type") == "global":
-            lower_triangle = get_empirical_covariance(train_loader).to(self.device)
+            lower_triangle = self._get_empirical_covariance(train_loader).to(
+                self.device
+            )
             rows, cols = torch.tril_indices(
                 row=self.config.data.num_concepts,
                 col=self.config.data.num_concepts,
@@ -156,6 +161,40 @@ class ExperimentRunner:
 
         model.to(self.device)
         return model
+
+    def _get_empirical_covariance(self, dataloader: DataLoader) -> torch.Tensor:
+        data = []
+        for batch in dataloader:
+            concepts = batch["concepts"]
+            data.append(concepts)
+        data = torch.cat(data)
+        data_logits = torch.logit(0.05 + 0.9 * data)
+        covariance = torch.cov(data_logits.transpose(0, 1))
+        covariance = numerical_stability_check(covariance, device="cpu")
+        return torch.linalg.cholesky(covariance)
+
+    def _get_concept_groups(self) -> list[str]:
+        config_data = self.config.data
+        if config_data.dataset == "CUB":
+            with open(
+                os.path.join(
+                    config_data.data_path, "CUB/CUB_200_2011/concept_names.txt"
+                ),
+                "r",
+            ) as f:
+                concept_names = []
+                for line in f:
+                    concept_names.append(line.replace("\n", "").split("::"))
+            return [": ".join(name) for name in concept_names]
+
+        if config_data.dataset == "cifar10":
+            with open(
+                os.path.join(config_data.data_path, "cifar10/cifar10_filtered.txt"),
+                "r",
+            ) as file:
+                return [line.strip() for line in file]
+
+        return [str(i) for i in range(config_data.num_concepts)]
 
     def _select_intervention_function(self) -> Callable:
         from utils.intervention import intervene_cbm, intervene_scbm

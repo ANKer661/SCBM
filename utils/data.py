@@ -1,7 +1,16 @@
 """
-Utility functions for data loading.
+Legacy data utilities.
+
+Dataset and DataLoader construction has been refactored into
+`datasets/datamodule.py`. The staged runner now keeps its runner-specific
+empirical covariance and concept-name setup locally in `training/runner.py`.
+
+This module is kept for compatibility with older imports. New staged-training
+code should import dataset builders from `datasets.datamodule` or keep
+runner-only setup in `training.runner`.
 """
 
+import os
 import torch
 
 from datasets.datamodule import build_dataloaders
