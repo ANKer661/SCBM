@@ -6,20 +6,19 @@ channels:
   - bioconda
   - defaults
 dependencies:
-  - python=3.11
+  - python=3.12
   - pytorch-cuda
-  - cuda-toolkit=12.1
   - pytorch
   - torchvision
   - wandb
   - scikit-learn
   - tqdm
-  - torchmetrics=0.11.4
+  - torchmetrics
   - matplotlib
   - conda-forge::hydra-core
   - plotly
   - anaconda::seaborn
-  - transformers=4.37.2
+  - transformers
   - pip
   - pip:
     - pytorch-minimize
