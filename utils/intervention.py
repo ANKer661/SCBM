@@ -600,6 +600,7 @@ def define_policy(policy):
     return intervention_policy
 
 
+# TODO: optimize via noise sort to determin intervene order
 class RandomSubsetInterventionPolicy:
     """
     A policy for randomly selecting concepts to intervene on.
