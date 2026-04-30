@@ -228,29 +228,39 @@ class CBM(nn.Module):
         assert isinstance(self.concept_predictor, nn.ModuleList)
         for predictor in self.concept_predictor:
             if c_prob:
-                concept = []
-                for i in range(
-                    self.num_monte_carlo
-                ):  # MCMC samples for evaluation and interventions, but not for training
-                    concept_input_i = torch.cat(
-                        [intermediate, torch.cat(c_hard, dim=1)[..., i]], dim=1
-                    )
-                    concept.append(self.act_c(predictor(concept_input_i)))
-                concept = torch.cat(concept, dim=-1)
-                c_relaxed = torch.bernoulli(concept)[:, None, :]
-                concept = concept[:, None, :]
+                previous_concepts = torch.cat(c_hard, dim=1).permute(
+                    0, 2, 1
+                )  # (B, num_monte_carlo, num_concepts_so_far)
+                expanded_intermediate = intermediate.unsqueeze(1).expand(
+                    -1, self.num_monte_carlo, -1
+                )  # (B, num_monte_carlo, n_concepts)
+                concept_input = torch.cat(
+                    [expanded_intermediate, previous_concepts], dim=2
+                )  # (B, num_monte_carlo, n_concepts + num_concepts_so_far)
+                batch_size = concept_input.size(0)
+                concept = self.act_c(
+                    predictor(concept_input.reshape(batch_size * self.num_monte_carlo, -1))
+                ).view(batch_size, self.num_monte_carlo)  # (B, num_monte_carlo)
+                c_relaxed = torch.bernoulli(concept)[:, None, :]  # (B, 1, num_monte_carlo)
+                concept = concept[:, None, :]  # (B, 1, num_monte_carlo)
                 concept_hard = c_relaxed
 
             else:
-                concept_input = intermediate
-                concept = self.act_c(predictor(concept_input))
-                concept = concept.unsqueeze(-1).expand(-1, -1, self.num_monte_carlo)
-                c_relaxed = torch.bernoulli(concept)
-                concept_hard = c_relaxed
+                concept_input = intermediate  # (B, n_concepts)
+                concept = self.act_c(predictor(concept_input))  # (B, 1)
+                concept = concept.unsqueeze(-1).expand(
+                    -1, -1, self.num_monte_carlo
+                )  # (B, 1, num_monte_carlo)
+                c_relaxed = torch.bernoulli(concept)  # (B, 1, num_monte_carlo)
+                concept_hard = c_relaxed  # (B, 1, num_monte_carlo)
             c_prob.append(concept)
             c_hard.append(concept_hard)
-        c_prob = torch.cat([c_prob[i] for i in range(self.num_concepts)], dim=1)
-        c = torch.cat([c_hard[i] for i in range(self.num_concepts)], dim=1)
+        c_prob = torch.cat(
+            [c_prob[i] for i in range(self.num_concepts)], dim=1
+        )  # (B, num_concepts, num_monte_carlo)
+        c = torch.cat(
+            [c_hard[i] for i in range(self.num_concepts)], dim=1
+        )  # (B, num_concepts, num_monte_carlo)
         return c_prob, c
 
     def _forward_ar_concepts_training(
@@ -303,20 +313,22 @@ class CBM(nn.Module):
             self.concept_learning == "autoregressive" and validation
         ):
             # Hard CBM or validation of AR. Takes MCMC samples.
-            # MCMC loop for predicting label
-            y_pred_probs_i = 0
-            for i in range(self.num_monte_carlo):
-                c_i = c[:, :, i]
-                y_pred_logits_i = self.head(c_i)
-                if self.pred_dim == 1:
-                    y_pred_probs_i += torch.sigmoid(y_pred_logits_i)
-                else:
-                    y_pred_probs_i += torch.softmax(y_pred_logits_i, dim=1)
-            y_pred_probs = y_pred_probs_i / self.num_monte_carlo
+            # c.shape = (B, num_concepts, num_monte_carlo)
+            batch_size, num_concepts, num_monte_carlo = c.shape
+            c_flat = c.permute(0, 2, 1).reshape(batch_size * num_monte_carlo, num_concepts)
+            y_pred_logits_flat = self.head(c_flat)
 
             if self.pred_dim == 1:
+                y_pred_probs = (
+                    torch.sigmoid(y_pred_logits_flat).view(batch_size, num_monte_carlo, 1).mean(dim=1)
+                )
                 y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
             else:
+                y_pred_probs = (
+                    torch.softmax(y_pred_logits_flat, dim=1)
+                    .view(batch_size, num_monte_carlo, self.pred_dim)
+                    .mean(dim=1)
+                )
                 y_pred_logits = torch.log(y_pred_probs + 1e-6)
 
         elif self.concept_learning == "soft":
