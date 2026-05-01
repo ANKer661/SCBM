@@ -1,5 +1,12 @@
 """
-Utility functions for intervention of SCBMs and baselines.
+Legacy intervention module.
+
+This file keeps the original intervention implementation for compatibility.
+The refactored intervention code lives in:
+- interventions/policies.py
+- interventions/strategies.py
+
+Do not extend this module for new intervention code.
 """
 
 import torch

@@ -197,7 +197,7 @@ class ExperimentRunner:
         return [str(i) for i in range(config_data.num_concepts)]
 
     def _select_intervention_function(self) -> Callable:
-        from utils.intervention import intervene_cbm, intervene_scbm
+        from interventions.evaluation import intervene_cbm, intervene_scbm
 
         if self.config.model.model == "cbm":
             return intervene_cbm
