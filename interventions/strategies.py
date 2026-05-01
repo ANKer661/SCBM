@@ -200,12 +200,9 @@ class SCBM_Strategy:
             interv_mu = perm_interv_mu
             interv_cov = perm_interv_cov
 
-        assert (
-            (mcmc_logits.isnan()).any()
-            == (interv_mu.isnan()).any()
-            == (interv_cov.isnan()).any()
-            == False
-        )
+        assert not torch.isnan(mcmc_logits).any(), "mcmc_logits contains NaN"
+        assert not torch.isnan(interv_mu).any(), "interv_mu contains NaN"
+        assert not torch.isnan(interv_cov).any(), "interv_cov contains NaN"
         # Compute probabilities and set intervened-on probs to 0/1
         mcmc_probs = self.act_c(mcmc_logits)
 
