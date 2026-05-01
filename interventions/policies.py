@@ -3,7 +3,7 @@
 import torch
 
 
-def define_policy(policy):
+def define_policy(policy: str):
     """
     Return the intervention policy that determines on which concepts to intervene
 
@@ -24,13 +24,12 @@ def define_policy(policy):
     elif policy == "prob_unc":
         intervention_policy = ProbUncertaintyInterventionPolicy()
     else:
-        raise NotImplementedError("No such policy as", policy, "defined!")
+        raise NotImplementedError(f"No such policy as {policy} defined!")
 
     print("USING FOLLOWING POLICY:", intervention_policy.__class__.__name__)
     return intervention_policy
 
 
-# TODO: optimize via noise sort to determin intervene order
 class RandomSubsetInterventionPolicy:
     """
     A policy for randomly selecting concepts to intervene on.
@@ -57,9 +56,7 @@ class RandomSubsetInterventionPolicy:
         )
 
         # Adjust for concepts that are already masked
-        non_masked_indices = torch.where(concepts_mask == 0)[1].reshape(
-            -1, num_noninterv_concepts
-        )
+        non_masked_indices = torch.where(concepts_mask == 0)[1].reshape(-1, num_noninterv_concepts)
         interv_indices_adjusted = non_masked_indices[
             torch.arange(concepts_mask.shape[0]), interv_indices
         ]
