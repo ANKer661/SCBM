@@ -25,7 +25,6 @@ from interventions.strategies import (
     HardCBMStrategy,
     PercentileStrategy,
     SCBM_Strategy,
-    SCBMPercentileStrategy,
     define_strategy,
 )
 from utils.utils import numerical_stability_check

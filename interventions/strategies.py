@@ -214,17 +214,6 @@ class SCBM_Strategy:
         return interv_mu, interv_cov, mcmc_probs, mcmc_logits
 
 
-class SCBMPercentileStrategy:
-    # Set intervened concept logits to 0.05 & 0.95
-    def __init__(self):
-        pass
-
-    def compute_intervened_logits(self, c_mu, c_cov, c_true, c_mask):
-        c_intervened_probs = (0.05 + 0.9 * c_true) * c_mask
-        c_intervened_logits = torch.logit(c_intervened_probs, eps=1e-6)
-        return c_intervened_logits
-
-
 class PercentileStrategy:
     # Set intervened concepts to 0.05 & 0.95 probabilities
     def __init__(self):
