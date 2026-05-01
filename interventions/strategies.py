@@ -47,12 +47,8 @@ def define_strategy(inter_strategy, train_loader, model, device, config):
         print("USING FOLLOWING STRATEGY:", inter_strategy.__class__.__name__)
 
     elif config.model.model == "scbm":
-        inter_strategy = SCBM_Strategy(
-            inter_strategy, train_loader, model, device, config
-        )
-        print(
-            "USING FOLLOWING STRATEGY:", inter_strategy.interv_strat.__class__.__name__
-        )
+        inter_strategy = SCBM_Strategy(inter_strategy, train_loader, model, device, config)
+        print("USING FOLLOWING STRATEGY:", inter_strategy.interv_strat.__class__.__name__)
     else:
         raise NotImplementedError(
             "No such strategy as",
@@ -145,12 +141,8 @@ class SCBM_Strategy:
             ## Compute conditional normal distribution sample-wise
             # Permute covariance s.t. intervened-on concepts are a block at start
             indices = torch.argsort(c_mask, dim=1, descending=True, stable=True)
-            perm_cov = c_cov.gather(
-                1, indices.unsqueeze(2).expand(-1, -1, c_cov.size(2))
-            )
-            perm_cov = perm_cov.gather(
-                2, indices.unsqueeze(1).expand(-1, c_cov.size(1), -1)
-            )
+            perm_cov = c_cov.gather(1, indices.unsqueeze(2).expand(-1, -1, c_cov.size(2)))
+            perm_cov = perm_cov.gather(2, indices.unsqueeze(1).expand(-1, c_cov.size(1), -1))
             perm_mu = c_mu.gather(1, indices)
             perm_c_intervened_logits = c_intervened_logits.gather(1, indices)
 
@@ -161,16 +153,13 @@ class SCBM_Strategy:
                 torch.inverse(perm_cov[:, :num_intervened, :num_intervened]),
             )
             perm_intermediate_mu = (
-                perm_c_intervened_logits[:, :num_intervened]
-                - perm_mu[:, :num_intervened]
+                perm_c_intervened_logits[:, :num_intervened] - perm_mu[:, :num_intervened]
             )
             # Mu and Cov
             perm_interv_mu = perm_mu[:, num_intervened:] + torch.matmul(
                 perm_intermediate_cov, perm_intermediate_mu.unsqueeze(-1)
             ).squeeze(-1)
-            perm_interv_cov = perm_cov[
-                :, num_intervened:, num_intervened:
-            ] - torch.matmul(
+            perm_interv_cov = perm_cov[:, num_intervened:, num_intervened:] - torch.matmul(
                 perm_intermediate_cov, perm_cov[:, :num_intervened, num_intervened:]
             )
 
@@ -180,13 +169,9 @@ class SCBM_Strategy:
             )  # Uncomment if Normal throws an error. Takes some time so maybe code it more smartly
 
             # Sample from conditional normal
-            perm_dist = MultivariateNormal(
-                perm_interv_mu, covariance_matrix=perm_interv_cov
-            )
+            perm_dist = MultivariateNormal(perm_interv_mu, covariance_matrix=perm_interv_cov)
             perm_mcmc_logits = (
-                perm_dist.rsample([self.num_monte_carlo])
-                .movedim(0, -1)
-                .to(torch.float32)
+                perm_dist.rsample([self.num_monte_carlo]).movedim(0, -1).to(torch.float32)
             )  # [bottleneck_size-num_intervened,mcmc_size]
 
             # Concat logits of intervened-on concepts
@@ -225,9 +210,9 @@ class SCBM_Strategy:
         mcmc_probs = self.act_c(mcmc_logits)
 
         # Set intervened-on hard concepts to 0/1
-        mcmc_probs = (c_true * c_mask).unsqueeze(2).repeat(
-            1, 1, self.num_monte_carlo
-        ) + mcmc_probs * (1 - c_mask).unsqueeze(2).repeat(1, 1, self.num_monte_carlo)
+        mcmc_probs = (c_true * c_mask).unsqueeze(2).repeat(1, 1, self.num_monte_carlo) + mcmc_probs * (
+            1 - c_mask
+        ).unsqueeze(2).repeat(1, 1, self.num_monte_carlo)
 
         return interv_mu, interv_cov, mcmc_probs, mcmc_logits
 
@@ -269,9 +254,7 @@ class EmpiricalPercentileStrategy:
         with torch.no_grad():
             for k, batch in enumerate(train_loader):
                 batch_features = batch["features"].to(device)
-                concepts_pred_probs, _, _ = model(
-                    batch_features, epoch=-1, validation=True
-                )
+                concepts_pred_probs, _, _ = model(batch_features, epoch=-1, validation=True)
                 if is_scbm:
                     # For SCBMs, we need to average over MCMC samples
                     concepts_pred_probs = concepts_pred_probs.mean(-1)
@@ -353,9 +336,7 @@ class ConfIntervalOptimalStrategy:
         # Separate intervened-on concepts from others
         indices = torch.argsort(c_mask, dim=1, descending=True, stable=True)
         perm_cov = c_cov.gather(1, indices.unsqueeze(2).expand(-1, -1, c_cov.size(2)))
-        perm_cov = perm_cov.gather(
-            2, indices.unsqueeze(1).expand(-1, c_cov.size(1), -1)
-        )
+        perm_cov = perm_cov.gather(2, indices.unsqueeze(1).expand(-1, c_cov.size(1), -1))
         marginal_interv_cov = perm_cov[:, :n_intervened, :n_intervened]
         marginal_interv_cov = numerical_stability_check(
             marginal_interv_cov.float(), device=marginal_interv_cov.device
@@ -363,10 +344,7 @@ class ConfIntervalOptimalStrategy:
         target = (c_true * c_mask).gather(1, indices)[:, :n_intervened].float().cpu()
         marginal_c_mu = c_mu.gather(1, indices)[:, :n_intervened].float().cpu()
         interv_direction = (
-            ((2 * c_true - 1) * c_mask)
-            .gather(1, indices)[:, :n_intervened]
-            .float()
-            .cpu()
+            ((2 * c_true - 1) * c_mask).gather(1, indices)[:, :n_intervened].float().cpu()
         )  # direction
         quantile_cutoff = chi2.ppf(q=self.level, df=n_intervened.cpu())
 
@@ -386,18 +364,14 @@ class ConfIntervalOptimalStrategy:
             max_iter=50,
             tol=1e-5,
         ).x
-        scale = (
-            scale.abs()
-        )  # in case negative root was found (note that both give same log-likelihood as its point-symmetric around 0)
+        scale = scale.abs()  # in case negative root was found (note that both give same log-likelihood as its point-symmetric around 0)
         x0 = marginal_c_mu + (interv_direction * scale)
 
         # Define bounds on logits
         lb_interv = torch.where(
             interv_direction > 0, marginal_c_mu + 1e-4, torch.tensor(float("-inf"))
         )
-        ub_interv = torch.where(
-            interv_direction < 0, marginal_c_mu - 1e-4, torch.tensor(float("inf"))
-        )
+        ub_interv = torch.where(interv_direction < 0, marginal_c_mu - 1e-4, torch.tensor(float("inf")))
 
         # Define confidence region
         dist_logits = MultivariateNormal(marginal_c_mu, marginal_interv_cov)
@@ -410,11 +384,8 @@ class ConfIntervalOptimalStrategy:
 
         #### Sample-wise constrained optimization (as there are no batched functions available out-of-the-box). Can surely be optimized
         for i in range(marginal_c_mu.shape[0]):
-
             # Define variables required for optimization
-            dist_logits_uni = MultivariateNormal(
-                marginal_c_mu[i], marginal_interv_cov[i]
-            )
+            dist_logits_uni = MultivariateNormal(marginal_c_mu[i], marginal_interv_cov[i])
             loglikeli_goal_uni = loglikeli_goal[i]
             target_uni = target[i]
             inverse = cov_inverse[i]
