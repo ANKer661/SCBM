@@ -1,9 +1,20 @@
 """Policies for choosing which concepts to intervene on."""
 
 import torch
+from abc import ABC, abstractmethod
 
 
-def define_policy(policy: str):
+class InterventionPolicy(ABC):
+    """
+    Abstract base class for intervention policies type hinting.
+    """
+
+    @abstractmethod
+    def compute_intervention_mask(self, concepts_mask: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        pass
+
+
+def define_policy(policy: str) -> InterventionPolicy:
     """
     Return the intervention policy that determines on which concepts to intervene
 
@@ -30,12 +41,12 @@ def define_policy(policy: str):
     return intervention_policy
 
 
-class RandomSubsetInterventionPolicy:
+class RandomSubsetInterventionPolicy(InterventionPolicy):
     """
     A policy for randomly selecting concepts to intervene on.
     """
 
-    def compute_intervention_mask(self, concepts_mask, **kwargs):
+    def compute_intervention_mask(self, concepts_mask: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Generate a mask for intervening on a randomly selected concepts, one at a time.
 
@@ -47,11 +58,13 @@ class RandomSubsetInterventionPolicy:
             torch.Tensor: An updated tensor with one additional masked concept.
                           Shape: (batch_size, num_concepts)
         """
-        num_noninterv_concepts = concepts_mask.shape[1] - concepts_mask.sum(1)[0]
+        batch_size, num_concepts = concepts_mask.shape
+        intervened_concepts = int(concepts_mask[0].sum().item())
+        num_noninterv_concepts = num_concepts - intervened_concepts
         interv_indices = torch.randint(
             low=0,
             high=num_noninterv_concepts,
-            size=(concepts_mask.shape[0],),
+            size=(batch_size,),
             device=concepts_mask.device,
         )
 
@@ -63,16 +76,18 @@ class RandomSubsetInterventionPolicy:
 
         concepts_mask[torch.arange(concepts_mask.shape[0]), interv_indices_adjusted] = 1
 
-        assert torch.all(concepts_mask.sum(1) == concepts_mask.sum(1)[0])
+        assert torch.all(concepts_mask.sum(dim=1) == intervened_concepts + 1)
         return concepts_mask
 
 
-class ProbUncertaintyInterventionPolicy:
+class ProbUncertaintyInterventionPolicy(InterventionPolicy):
     """
     A policy for uncertainty-based selection of concepts to intervene on.
     """
 
-    def compute_intervention_mask(self, concepts_mask, concepts_pred_probs, **kwargs):
+    def compute_intervention_mask(
+        self, concepts_mask: torch.Tensor, concepts_pred_probs: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
         """
         Generate a mask for intervening on selected concepts as determined by highest uncertainty, one at a time.
 
