@@ -63,23 +63,13 @@ class CBM(nn.Module):
                 "This is because we would deem this an unfair comparison to our method that is also not "
                 "trained on interventions. Still, be careful when using this CEM code for derivative works"
             )
-            self.positive_embeddings = nn.ModuleList(
-                [
-                    nn.Sequential(
-                        nn.Linear(n_features, self.CEM_embedding, bias=True),
-                        nn.LeakyReLU(),
-                    )
-                    for _ in range(self.num_concepts)
-                ]
+            self.positive_embeddings = nn.Sequential(
+                nn.Linear(n_features, self.num_concepts * self.CEM_embedding, bias=True),
+                nn.LeakyReLU(),
             )
-            self.negative_embeddings = nn.ModuleList(
-                [
-                    nn.Sequential(
-                        nn.Linear(n_features, self.CEM_embedding, bias=True),
-                        nn.LeakyReLU(),
-                    )
-                    for _ in range(self.num_concepts)
-                ]
+            self.negative_embeddings = nn.Sequential(
+                nn.Linear(n_features, self.num_concepts * self.CEM_embedding, bias=True),
+                nn.LeakyReLU(),
             )
             self.scoring_function = nn.Sequential(
                 nn.Linear(self.CEM_embedding * 2, 1, bias=True), nn.Sigmoid()
@@ -280,20 +270,21 @@ class CBM(nn.Module):
             raise ValueError("CEMs are trained jointly, change training mode")
 
         # Obtaining concept embeddings
-        c_p = [p(intermediate) for p in self.positive_embeddings]
-        c_n = [n(intermediate) for n in self.negative_embeddings]
+        batch_size = intermediate.size(0)
+        c_p = self.positive_embeddings(intermediate).view(
+            batch_size, self.num_concepts, self.CEM_embedding
+        )
+        c_n = self.negative_embeddings(intermediate).view(
+            batch_size, self.num_concepts, self.CEM_embedding
+        )
 
         # Concept probabilities from scoring function
-        c_prob = [
-            self.scoring_function(torch.cat((c_p[i], c_n[i]), dim=1)) for i in range(self.num_concepts)
-        ]
+        c_prob = self.scoring_function(torch.cat((c_p, c_n), dim=-1))  # (B, num_concepts, 1)
 
         # Final concept embedding
-        z_prob = [c_prob[i] * c_p[i] + (1 - c_prob[i]) * c_n[i] for i in range(self.num_concepts)]
-        z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
-        c_prob = torch.cat([c_prob[i] for i in range(self.num_concepts)], dim=1)
-        c = z_prob
-        return c_prob, c
+        c = c_prob * c_p + (1 - c_prob) * c_n  # (B, num_concepts, CEM_embedding)
+        c = c.reshape(batch_size, self.concept_dim)
+        return c_prob.squezze(-1), c
 
     def _predict_target(
         self, c: torch.Tensor, c_logit: torch.Tensor | None, validation: bool
@@ -421,14 +412,18 @@ class CBM(nn.Module):
         self, concepts_interv_probs: torch.Tensor, input_features: torch.Tensor
     ) -> torch.Tensor:
         intermediate = self.encoder(input_features)
-        c_p = [p(intermediate) for p in self.positive_embeddings]
-        c_n = [n(intermediate) for n in self.negative_embeddings]
-        z_prob = [
-            concepts_interv_probs[:, i].unsqueeze(1) * c_p[i]
-            + (1 - concepts_interv_probs[:, i].unsqueeze(1)) * c_n[i]
-            for i in range(self.num_concepts)
-        ]
-        z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
+        batch_size = intermediate.size(0)
+        c_p = self.positive_embeddings(intermediate).view(
+            batch_size, self.num_concepts, self.CEM_embedding
+        )
+        c_n = self.negative_embeddings(intermediate).view(
+            batch_size, self.num_concepts, self.CEM_embedding
+        )
+        z_prob = (
+            concepts_interv_probs.unsqueeze(-1) * c_p
+            + (1 - concepts_interv_probs).unsqueeze(-1) * c_n
+        )
+        z_prob = z_prob.reshape(batch_size, self.concept_dim)
         return self.head(z_prob)
 
     def intervene_ar(
