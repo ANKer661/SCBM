@@ -60,6 +60,15 @@ class SCBM(nn.Module):
             self.num_epochs = config_model.t_epochs
         self.cov_type = config_model.cov_type
 
+        # buffer for sigma
+        self.cov_rows: torch.Tensor
+        self.cov_cols: torch.Tensor
+        self.cov_diag_idx: torch.Tensor
+        rows, cols = torch.tril_indices(row=self.num_concepts, col=self.num_concepts, offset=0)
+        self.register_buffer("cov_rows", rows, persistent=False)
+        self.register_buffer("cov_cols", cols, persistent=False)
+        self.register_buffer("cov_diag_idx", rows == cols, persistent=False)
+
         self.init_temp = 1.0
         self.final_temp = 0.5
         self.temp_decay_rate = (math.log(self.final_temp) - math.log(self.init_temp)) / float(
@@ -164,11 +173,9 @@ class SCBM(nn.Module):
                 (c_sigma.shape[0], self.num_concepts, self.num_concepts),
                 device=c_sigma.device,
             )
-            rows, cols = torch.tril_indices(row=self.num_concepts, col=self.num_concepts, offset=0)
-            diag_idx = rows == cols
-            c_triang_cov[:, rows, cols] = c_sigma
+            c_triang_cov[:, self.cov_rows, self.cov_cols] = c_sigma
             c_triang_cov[:, range(self.num_concepts), range(self.num_concepts)] = (
-                F.softplus(c_sigma[:, diag_idx]) + 1e-6
+                F.softplus(c_sigma[:, self.cov_diag_idx]) + 1e-6
             )
 
         # Sample from predicted normal distribution

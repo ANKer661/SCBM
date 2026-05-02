@@ -186,8 +186,19 @@ class SCBLoss(nn.Module):
             if cov_not_triang:
                 prec_matrix = torch.inverse(c_triang_cov)
             else:
-                c_triang_inv = torch.inverse(c_triang_cov)
-                prec_matrix = torch.matmul(torch.transpose(c_triang_inv, dim0=1, dim1=2), c_triang_inv)
+                identity = torch.eye(
+                    c_triang_cov.size(-1),
+                    device=c_triang_cov.device,
+                    dtype=c_triang_cov.dtype,
+                ).expand_as(c_triang_cov)
+                c_triang_inv = torch.linalg.solve_triangular(
+                    c_triang_cov,
+                    identity,
+                    upper=False,
+                )
+                prec_matrix = torch.matmul(
+                    torch.transpose(c_triang_inv, dim0=1, dim1=2), c_triang_inv
+                )
             prec_loss = prec_matrix.abs().sum(dim=(1, 2)) - prec_matrix.diagonal(
                 offset=0, dim1=1, dim2=2
             ).abs().sum(-1)
