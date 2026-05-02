@@ -1,5 +1,7 @@
 """Evaluation flows for interventions on SCBMs and baselines."""
 
+from __future__ import annotations
+
 import typing
 
 import torch
@@ -11,7 +13,6 @@ from interventions.policies import define_policy
 from interventions.strategies import define_strategy
 from models.cbm import CBM
 from models.scbm import SCBM
-from training.metrics import Custom_Metrics
 from utils.utils import numerical_stability_check
 
 if typing.TYPE_CHECKING:
@@ -26,6 +27,7 @@ if typing.TYPE_CHECKING:
 
 
 def _concat_stored_tensors(stored_tensors: list) -> list[torch.Tensor]:
+    """Concatenate each tensor slot collected from per-batch intervention storage."""
     return [
         torch.cat([sublist[i] for sublist in stored_tensors], dim=0)
         for i in range(len(stored_tensors[0]))
@@ -33,20 +35,13 @@ def _concat_stored_tensors(stored_tensors: list) -> list[torch.Tensor]:
 
 
 def _make_intervention_loader(intervention_dataset: Dataset, config: DictConfig) -> DataLoader:
+    """Build the deterministic DataLoader used for stored intervention tensors."""
     return DataLoader(
         intervention_dataset,
         batch_size=config.model.val_batch_size,
         num_workers=config.workers,
         shuffle=False,
     )
-
-
-def _new_step_metrics(
-    metrics: Metric, num_interventions: int, device: torch.device
-) -> list[Custom_Metrics]:
-    return [
-        Custom_Metrics(metrics.n_concepts, device).to(device) for _ in range(num_interventions + 1)
-    ]
 
 
 def _log_intervention_metrics(
@@ -57,6 +52,7 @@ def _log_intervention_metrics(
     num_intervened: int,
     define_metrics: bool = False,
 ) -> None:
+    """Compute, print, log, and reset intervention metrics for one intervention count."""
     metrics_dict = metrics.compute(validation=True, config=config)
 
     if define_metrics:
@@ -91,6 +87,7 @@ def _build_intervention_components(
     device: torch.device,
     config: DictConfig,
 ) -> tuple:
+    """Instantiate the policy and strategy for one configured intervention run."""
     try:
         intervention_policy = define_policy(policy)
         intervention_strategy = define_strategy(strategy, train_loader, model, device, config)
@@ -113,6 +110,7 @@ def _collect_scbm_intervention_dataset(
     device: torch.device,
     intervention_strategy,
 ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    """Run the SCBM test pass and store tensors needed for later intervention steps."""
     intervention_dataset_base = []
     intervention_dataset_fixed = []
 
@@ -120,12 +118,9 @@ def _collect_scbm_intervention_dataset(
         for k, batch in enumerate(test_loader):
             batch_features, target_true = batch["features"].to(device), batch["labels"].to(device)
             concepts_true = batch["concepts"].to(device)
-            (
-                concepts_mcmc_probs,
-                mu,
-                triang_cov,
-                target_pred_logits,
-            ) = model(batch_features, epoch, validation=True, return_full=True)
+            concepts_mcmc_probs, mu, triang_cov, target_pred_logits = model(
+                batch_features, epoch, validation=True, return_full=True
+            )
 
             target_loss, concepts_loss, prec_loss, total_loss = loss_fn(
                 concepts_mcmc_probs,
@@ -157,12 +152,7 @@ def _collect_scbm_intervention_dataset(
                 prec_loss=prec_loss,
             )
 
-            (
-                _,
-                _,
-                c_mcmc_probs,
-                _,
-            ) = intervention_strategy.compute_intervention(
+            _, _, c_mcmc_probs, _ = intervention_strategy.compute_intervention(
                 c_mu,
                 c_cov,
                 concepts_true,
@@ -202,6 +192,7 @@ def _run_scbm_intervention_step(
     loss_fn: Callable,
     device: torch.device,
 ) -> TensorDataset:
+    """Apply one more SCBM intervention step and return the updated stored dataset."""
     updated_intervention_dataset = []
     intervention_loader = _make_intervention_loader(intervention_dataset, config)
 
@@ -287,6 +278,7 @@ def _run_scbm_batch_first_interventions(
     loss_fn,
     device,
 ) -> None:
+    """Prototype batch-first SCBM intervention loop; not used by the active flow."""
     intervention_loader = _make_intervention_loader(intervention_dataset, config)
 
     with torch.no_grad():
@@ -357,6 +349,7 @@ def _collect_cbm_intervention_dataset(
     loss_fn: Callable,
     device: torch.device,
 ) -> list[torch.Tensor]:
+    """Run the CBM test pass and store tensors needed for later intervention steps."""
     intervention_dataset_base = []
 
     with torch.no_grad():
@@ -415,6 +408,7 @@ def _run_cbm_intervention_step(
     loss_fn: Callable,
     device: torch.device,
 ) -> torch.Tensor:
+    """Apply one more CBM intervention step and return the updated concept mask."""
     intervention_dataset = TensorDataset(*intervention_dataset_base, concepts_dataset_mask)
     intervention_loader = _make_intervention_loader(intervention_dataset, config)
     concepts_dataset_mask_new = []
@@ -496,6 +490,7 @@ def _run_cbm_batch_first_interventions(
     loss_fn,
     device,
 ):
+    """Prototype batch-first CBM intervention loop; not used by the active flow."""
     concepts_dataset_mask = torch.zeros_like(intervention_dataset_base[1])
     intervention_dataset = TensorDataset(*intervention_dataset_base, concepts_dataset_mask)
     intervention_loader = _make_intervention_loader(intervention_dataset, config)
@@ -607,7 +602,6 @@ def intervene_scbm(
     for strategy in strategies:
         # Intervening with different policies
         for policy in policies:
-            step_metrics = _new_step_metrics(metrics, num_interventions, device)
             intervention_policy, intervention_strategy = _build_intervention_components(
                 strategy, policy, train_loader, model, device, config
             )
@@ -618,7 +612,7 @@ def intervene_scbm(
             intervention_dataset_base, intervention_dataset_fixed = _collect_scbm_intervention_dataset(
                 test_loader,
                 model,
-                step_metrics[0],
+                metrics,
                 epoch,
                 config,
                 loss_fn,
@@ -636,7 +630,7 @@ def intervene_scbm(
             )
 
             _log_intervention_metrics(
-                step_metrics[0],
+                metrics,
                 config,
                 strategy,
                 policy,
@@ -650,13 +644,13 @@ def intervene_scbm(
                     intervention_policy,
                     intervention_strategy,
                     model,
-                    step_metrics[num_intervened],
+                    metrics,
                     config,
                     loss_fn,
                     device,
                 )
                 _log_intervention_metrics(
-                    step_metrics[num_intervened],
+                    metrics,
                     config,
                     strategy,
                     policy,
@@ -713,7 +707,6 @@ def intervene_cbm(
     for strategy in strategies:
         # Intervening with different policies
         for policy in policies:
-            step_metrics = _new_step_metrics(metrics, num_interventions, device)
             intervention_policy, intervention_strategy = _build_intervention_components(
                 strategy, policy, train_loader, model, device, config
             )
@@ -722,11 +715,11 @@ def intervene_cbm(
 
             # One full model pass without interventions
             intervention_dataset_base = _collect_cbm_intervention_dataset(
-                test_loader, model, step_metrics[0], epoch, config, loss_fn, device
+                test_loader, model, metrics, epoch, config, loss_fn, device
             )
 
             _log_intervention_metrics(
-                step_metrics[0],
+                metrics,
                 config,
                 strategy,
                 policy,
@@ -741,13 +734,13 @@ def intervene_cbm(
                     intervention_policy,
                     intervention_strategy,
                     model,
-                    step_metrics[num_intervened],
+                    metrics,
                     config,
                     loss_fn,
                     device,
                 )
                 _log_intervention_metrics(
-                    step_metrics[num_intervened],
+                    metrics,
                     config,
                     strategy,
                     policy,
