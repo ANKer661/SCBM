@@ -2,16 +2,21 @@
 Utility methods for constructing loss functions
 """
 
+from __future__ import annotations
+
 import math
+import typing
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from typing import Optional
+
+if typing.TYPE_CHECKING:
+    from omegaconf import DictConfig
 
 
-def create_loss(config):
+def create_loss(config: DictConfig) -> CBLoss | SCBLoss:
     """
     Create and return a loss function based on the configuration.
 
@@ -45,10 +50,10 @@ class CBLoss(nn.Module):
 
     def __init__(
         self,
-        num_classes: Optional[int] = 2,
-        reduction: str = "mean",
-        alpha: float = 1,
-        config: dict = {},
+        num_classes: int,
+        reduction: str,
+        alpha: float,
+        config: DictConfig,
     ) -> None:
         """
         Initialize the CBLoss.
@@ -70,7 +75,7 @@ class CBLoss(nn.Module):
         concepts_true: Tensor,
         target_pred_logits: Tensor,
         target_true: Tensor,
-    ) -> Tensor:
+    ) -> tuple[Tensor, Tensor, Tensor]:
         """
         Compute the loss.
 
@@ -101,19 +106,19 @@ class CBLoss(nn.Module):
 
         return target_loss, concepts_loss, total_loss
 
-
-    def compute_concept_loss(self, concepts_true, concepts_pred_probs):
-        concepts_true = concepts_true.float() # [B, C]    
+    def compute_concept_loss(self, concepts_true, concepts_pred_probs) -> Tensor:
+        concepts_true = concepts_true.float()  # [B, C]
         concepts_loss = F.binary_cross_entropy(
-            concepts_pred_probs, concepts_true , reduction='none'
-        ) #  [B, C]
-    
-        if self.reduction == 'mean':
+            concepts_pred_probs, concepts_true, reduction="none"
+        )  #  [B, C]
+
+        if self.reduction == "mean":
             concepts_loss = concepts_loss.mean(dim=0).sum()
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             concepts_loss = concepts_loss.sum(dim=0).sum()
-    
-        return (self.alpha * concepts_loss)
+
+        return self.alpha * concepts_loss
+
 
 class SCBLoss(nn.Module):
     """
@@ -121,7 +126,10 @@ class SCBLoss(nn.Module):
     """
 
     def __init__(
-        self, num_classes: Optional[int] = 2, alpha: float = 1, config: dict = {}
+        self,
+        num_classes: int,
+        alpha: float,
+        config: DictConfig,
     ) -> None:
         """
         Initialize the SCBLoss.
@@ -147,7 +155,7 @@ class SCBLoss(nn.Module):
         target_true: Tensor,
         c_triang_cov: Tensor,
         cov_not_triang=False,
-    ) -> Tensor:
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """
         Compute the loss.
 
@@ -171,9 +179,7 @@ class SCBLoss(nn.Module):
                 target_pred_probs, target_true.float(), reduction="mean"
             )
         else:
-            target_loss = F.cross_entropy(
-                target_pred_logits, target_true.long(), reduction="mean"
-            )
+            target_loss = F.cross_entropy(target_pred_logits, target_true.long(), reduction="mean")
 
         # Add precision loss
         if self.reg_precision == "l1":
@@ -181,16 +187,12 @@ class SCBLoss(nn.Module):
                 prec_matrix = torch.inverse(c_triang_cov)
             else:
                 c_triang_inv = torch.inverse(c_triang_cov)
-                prec_matrix = torch.matmul(
-                    torch.transpose(c_triang_inv, dim0=1, dim1=2), c_triang_inv
-                )
+                prec_matrix = torch.matmul(torch.transpose(c_triang_inv, dim0=1, dim1=2), c_triang_inv)
             prec_loss = prec_matrix.abs().sum(dim=(1, 2)) - prec_matrix.diagonal(
                 offset=0, dim1=1, dim2=2
             ).abs().sum(-1)
             if prec_matrix.size(1) > 1:
-                prec_loss = prec_loss / (
-                    prec_matrix.size(1) * (prec_matrix.size(1) - 1)
-                )
+                prec_loss = prec_loss / (prec_matrix.size(1) * (prec_matrix.size(1) - 1))
             else:  # Univariate case, can happen when intervening
                 prec_loss = prec_loss
             prec_loss = self.reg_weight * prec_loss.mean(-1)
@@ -201,11 +203,9 @@ class SCBLoss(nn.Module):
 
         return target_loss, concepts_loss, prec_loss, total_loss
 
-    def compute_concept_loss(self, concepts_mcmc_probs, concepts_true):
+    def compute_concept_loss(self, concepts_mcmc_probs, concepts_true) -> Tensor:
         assert torch.all((concepts_true == 0) | (concepts_true == 1))
-        concepts_true_expanded = concepts_true.unsqueeze(-1).expand_as(
-            concepts_mcmc_probs
-        )
+        concepts_true_expanded = concepts_true.unsqueeze(-1).expand_as(concepts_mcmc_probs)
 
         bce_loss = F.binary_cross_entropy(
             concepts_mcmc_probs, concepts_true_expanded.float(), reduction="none"
