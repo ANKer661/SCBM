@@ -213,6 +213,13 @@ class CBM(nn.Module):
             f"Undefined behavior for Autoregressive CBM with {self.training_mode = } and {validation = }."
         )
 
+    def forward_target_from_concepts(
+        self, concepts: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        concept_probs = concepts.float()
+        target_logits = self.head(concept_probs)
+        return concept_probs, target_logits
+
     def _forward_ar_validation(self, intermediate: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         assert isinstance(self.concept_predictor, nn.ModuleList)
 
@@ -284,7 +291,7 @@ class CBM(nn.Module):
         # Final concept embedding
         c = c_prob * c_p + (1 - c_prob) * c_n  # (B, num_concepts, CEM_embedding)
         c = c.reshape(batch_size, self.concept_dim)
-        return c_prob.squezze(-1), c
+        return c_prob.squeeze(-1), c
 
     def _predict_target(
         self, c: torch.Tensor, c_logit: torch.Tensor | None, validation: bool
@@ -420,8 +427,7 @@ class CBM(nn.Module):
             batch_size, self.num_concepts, self.CEM_embedding
         )
         z_prob = (
-            concepts_interv_probs.unsqueeze(-1) * c_p
-            + (1 - concepts_interv_probs).unsqueeze(-1) * c_n
+            concepts_interv_probs.unsqueeze(-1) * c_p + (1 - concepts_interv_probs).unsqueeze(-1) * c_n
         )
         z_prob = z_prob.reshape(batch_size, self.concept_dim)
         return self.head(z_prob)

@@ -6,9 +6,21 @@ forward_train, compute_loss, backward_loss, update_metrics — without branching
 type. Each adapter implements these methods according to its model's requirements.
 """
 
+from __future__ import annotations
+
+import typing
 from dataclasses import dataclass
 
 import torch
+
+if typing.TYPE_CHECKING:
+    from typing import Callable
+
+    from models.cbm import CBM
+    from models.scbm import SCBM
+    from training.stages import TrainingStage
+    from omegaconf import DictConfig
+    from torchmetrics import Metric
 
 
 @dataclass
@@ -34,12 +46,12 @@ class LossOutput:
 
 
 class CBMAdapter:
-    def __init__(self, model, loss_fn, config) -> None:
+    def __init__(self, model: CBM, loss_fn: Callable, config: DictConfig) -> None:
         self.model = model
         self.loss_fn = loss_fn
         self.config = config
 
-    def prepare_train(self, stage) -> None:
+    def prepare_train(self, stage: TrainingStage) -> None:
         self.model.train()
         if self.config.model.training_mode in ("sequential", "independent"):
             if stage.mode == "c":
@@ -47,8 +59,14 @@ class CBMAdapter:
             elif stage.mode == "t":
                 self.model.encoder.eval()
 
-    def forward_train(self, batch: BatchTensors, epoch: int, stage) -> BatchOutput:
-        if self.config.model.training_mode == "independent" and stage.mode == "t":
+    def forward_train(self, batch: BatchTensors, epoch: int, stage: TrainingStage) -> BatchOutput:
+        if (
+            self.config.model.concept_learning == "autoregressive"
+            and self.config.model.training_mode == "independent"
+            and stage.mode == "t"
+        ):
+            concept_probs, target_logits = self.model.forward_target_from_concepts(batch.concepts)
+        elif self.config.model.training_mode == "independent" and stage.mode == "t":
             concept_probs, target_logits, _ = self.model(batch.features, epoch, batch.concepts)
         elif self.config.model.concept_learning == "autoregressive" and stage.mode == "c":
             concept_probs, target_logits, _ = self.model(
@@ -86,7 +104,7 @@ class CBMAdapter:
         return losses.target_loss
 
     def update_metrics(
-        self, metrics, losses: LossOutput, batch: BatchTensors, output: BatchOutput
+        self, metrics: Metric, losses: LossOutput, batch: BatchTensors, output: BatchOutput
     ) -> None:
         metrics.update(
             losses.target_loss,
@@ -101,9 +119,9 @@ class CBMAdapter:
     def maybe_plot_test_batch(
         self,
         output,
-        batch: BatchTensors,
-        batch_idx: int,
-        loader_len: int,
+        batch,
+        batch_idx,
+        loader_len,
         config,
         concept_names_graph,
     ) -> None:
@@ -111,7 +129,7 @@ class CBMAdapter:
 
 
 class SCBMAdapter:
-    def __init__(self, model, loss_fn, config) -> None:
+    def __init__(self, model: SCBM, loss_fn: Callable, config: DictConfig) -> None:
         self.model = model
         self.loss_fn = loss_fn
         self.config = config
@@ -159,7 +177,7 @@ class SCBMAdapter:
             total_loss=total_loss,
         )
 
-    def backward_loss(self, losses: LossOutput, stage) -> torch.Tensor:
+    def backward_loss(self, losses: LossOutput, stage: TrainingStage) -> torch.Tensor:
         if stage.mode == "c":
             assert losses.precision_matrix_loss is not None
             return losses.concepts_loss + losses.precision_matrix_loss
@@ -168,7 +186,7 @@ class SCBMAdapter:
         return losses.target_loss
 
     def update_metrics(
-        self, metrics, losses: LossOutput, batch: BatchTensors, output: BatchOutput
+        self, metrics: Metric, losses: LossOutput, batch: BatchTensors, output: BatchOutput
     ) -> None:
         assert losses.precision_matrix_loss is not None
         metrics.update(
@@ -184,12 +202,12 @@ class SCBMAdapter:
 
     def maybe_plot_test_batch(
         self,
-        output,
+        output: BatchOutput,
         batch: BatchTensors,
         batch_idx: int,
         loader_len: int,
-        config,
-        concept_names_graph,
+        config: DictConfig,
+        concept_names_graph: list[str],
     ) -> None:
         if batch_idx % max(1, loader_len // 10) != 0:
             return
@@ -197,6 +215,7 @@ class SCBMAdapter:
         try:
             from utils.plotting import compute_and_plot_heatmap
 
+            assert output.covariance is not None
             cov = torch.matmul(
                 output.covariance,
                 torch.transpose(output.covariance, dim0=1, dim1=2),
@@ -204,13 +223,17 @@ class SCBMAdapter:
             corr = (cov[0] / cov[0].diag().sqrt()).transpose(dim0=0, dim1=1) / cov[0].diag().sqrt()
             compute_and_plot_heatmap(corr.cpu().numpy(), batch.concepts, concept_names_graph, config)
         except Exception:
-            pass
+            print("Failed to plot heatmap for batch", batch_idx)
 
 
-def create_adapter(model, loss_fn, config) -> CBMAdapter | SCBMAdapter:
+def create_adapter(
+    model: CBM | SCBM, loss_fn: Callable, config: DictConfig
+) -> CBMAdapter | SCBMAdapter:
     if config.model.model == "cbm":
+        assert isinstance(model, CBM)
         return CBMAdapter(model, loss_fn, config)
     elif config.model.model == "scbm":
+        assert isinstance(model, SCBM)
         return SCBMAdapter(model, loss_fn, config)
     else:
         raise ValueError(f"Unknown model type: {config.model.model}")
