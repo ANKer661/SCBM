@@ -65,7 +65,7 @@ def define_strategy(
         print("USING FOLLOWING STRATEGY:", strategy.__class__.__name__)
 
     elif config.model.model == "scbm":
-        strategy = SCBM_Strategy(inter_strategy, train_loader, model, device, config)
+        strategy = SCBMConditionalStrategy(inter_strategy, train_loader, model, device, config)
         print("USING FOLLOWING STRATEGY:", strategy.interv_strat.__class__.__name__)
     else:
         raise NotImplementedError(
@@ -75,7 +75,7 @@ def define_strategy(
     return strategy
 
 
-class SCBM_Strategy:
+class SCBMConditionalStrategy:
     """
     A strategy for intervening on SCBM using the conditional normal distribution.
 
@@ -226,6 +226,9 @@ class SCBM_Strategy:
         ).unsqueeze(2).repeat(1, 1, self.num_monte_carlo)
 
         return interv_mu, interv_cov, mcmc_probs, mcmc_logits
+
+
+SCBM_Strategy = SCBMConditionalStrategy
 
 
 class PercentileStrategy:
@@ -442,7 +445,7 @@ class ConfIntervalOptimalStrategy:
 
 class HardCBMStrategy:
     # Set intervened concepts to 0 & 1
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def compute_intervention_cbm(self, c_pred, c_true, c_mask):
