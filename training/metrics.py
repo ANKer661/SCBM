@@ -2,9 +2,9 @@
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from omegaconf import DictConfig
 from sklearn.metrics import jaccard_score
-from torch import nn
 from torchmetrics import Metric
 
 from utils.metrics import calc_concept_metrics, calc_target_metrics
@@ -15,7 +15,7 @@ class Custom_Metrics(Metric):
     Track and compute losses, target metrics, and concept metrics per epoch.
     """
 
-    def __init__(self, n_concepts, device) -> None:
+    def __init__(self, n_concepts: int, device: torch.device) -> None:
         super().__init__()
         self.n_concepts = n_concepts
         self.target_loss: torch.Tensor
@@ -55,8 +55,6 @@ class Custom_Metrics(Metric):
         assert c_true.shape == c_pred_probs.shape
 
         n_samples = y_true.size(0)
-        self.ce = nn.CrossEntropyLoss()
-        self.bce = nn.BCELoss()
         self.n_samples += n_samples
         self.target_loss += target_loss * n_samples
         self.concepts_loss += concepts_loss * n_samples
@@ -70,17 +68,17 @@ class Custom_Metrics(Metric):
         if prec_loss is not None:
             self.prec_loss += prec_loss * n_samples
 
-    def compute(self, validation: bool = False, config: DictConfig | None = None):
+    def compute(self, validation: bool = False, config: DictConfig | None = None) -> dict:
         y_true = torch.cat(self.y_true, dim=0).cpu()
         c_true = torch.cat(self.c_true, dim=0).cpu()
         c_pred_probs = torch.cat(self.c_pred_probs, dim=0).cpu()
         y_pred_logits = torch.cat(self.y_pred_logits, dim=0).cpu()
         c_pred = c_pred_probs > 0.5
         if y_pred_logits.size(1) == 1:
-            y_pred_probs = nn.Sigmoid()(y_pred_logits.squeeze())
+            y_pred_probs = F.sigmoid(y_pred_logits.squeeze())
             y_pred = y_pred_probs > 0.5
         else:
-            y_pred_probs = nn.Softmax(dim=1)(y_pred_logits)
+            y_pred_probs = F.softmax(y_pred_logits, dim=1)
             y_pred = y_pred_logits.argmax(dim=-1)
 
         target_acc = (y_true == y_pred).sum() / self.n_samples

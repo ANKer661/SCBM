@@ -230,9 +230,13 @@ def create_adapter(
     model: CBM | SCBM, loss_fn: Callable, config: DictConfig
 ) -> CBMAdapter | SCBMAdapter:
     if config.model.model == "cbm":
+        from models.cbm import CBM
+
         assert isinstance(model, CBM)
         return CBMAdapter(model, loss_fn, config)
     elif config.model.model == "scbm":
+        from models.scbm import SCBM
+
         assert isinstance(model, SCBM)
         return SCBMAdapter(model, loss_fn, config)
     else:
