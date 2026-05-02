@@ -249,20 +249,22 @@ class PercentileStrategy:
 
 class EmpiricalPercentileStrategy:
     # Set intervened concepts to 5th and 95th percentile of training distribution
-    def __init__(self, train_loader, model, device, is_scbm=False):
+    def __init__(
+        self, train_loader: DataLoader, model: nn.Module, device: torch.device, is_scbm: bool = False
+    ) -> None:
         concept_pred = []
         with torch.no_grad():
-            for k, batch in enumerate(train_loader):
+            for _, batch in enumerate(train_loader):
                 batch_features = batch["features"].to(device)
                 concepts_pred_probs, _, _ = model(batch_features, epoch=-1, validation=True)
                 if is_scbm:
                     # For SCBMs, we need to average over MCMC samples
                     concepts_pred_probs = concepts_pred_probs.mean(-1)
-                concept_pred.append(concepts_pred_probs.cpu())
+                concept_pred.append(concepts_pred_probs.detach())
         concept_pred = torch.cat(concept_pred, dim=0)
         self.concept_pred_percentiles = torch.quantile(
-            concept_pred, q=torch.tensor([0.05, 0.95]), dim=0
-        ).to(device)
+            concept_pred, q=torch.tensor([0.05, 0.95], device=device), dim=0
+        )
 
     def _compute_intervened_perc(self, c_true, c_mask):
         c_true_pred_perc = torch.where(
