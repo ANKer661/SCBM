@@ -240,27 +240,24 @@ class SCBM(nn.Module):
             return y_pred_log_probs
 
     def intervene(self, c_mcmc_probs: torch.Tensor, c_mcmc_logits: torch.Tensor) -> torch.Tensor:
-        y_pred_probs_i = 0
         c_hard = torch.bernoulli(c_mcmc_probs)
-        for i in range(self.num_monte_carlo):
-            if self.concept_learning == "soft":
-                c_i = c_mcmc_logits[:, :, i]
-            else:
-                c_i = c_hard[:, :, i]
+        x = c_mcmc_logits if self.concept_learning == "soft" else c_hard
+        batch_size, num_concepts, num_monte_carlo = x.shape
+        x_flat = x.permute(0, 2, 1).reshape(batch_size * num_monte_carlo, num_concepts)
+        y_pred_logits_flat = self.head(x_flat)  # (B * C, pred_dim)
 
-            y_pred_logits_i = self.head(c_i)
-            if self.pred_dim == 1:
-                y_pred_probs_i += torch.sigmoid(y_pred_logits_i)
-            else:
-                y_pred_probs_i += torch.softmax(y_pred_logits_i, dim=1)
-
-        y_pred_probs = y_pred_probs_i / self.num_monte_carlo
         if self.pred_dim == 1:
-            y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
-        else:
-            y_pred_logits = torch.log(y_pred_probs + 1e-6)
-
-        return y_pred_logits
+            y_pred_probs = (
+                torch.sigmoid(y_pred_logits_flat).view(batch_size, num_monte_carlo, 1).mean(dim=1)
+            )  # [B, 1]
+            return torch.logit(y_pred_probs, eps=1e-6)
+        else:  # multiclass
+            y_pred_probs = (
+                torch.softmax(y_pred_logits_flat, dim=1)
+                .view(batch_size, num_monte_carlo, self.pred_dim)
+                .mean(dim=1)
+            )  # [B, pred_dim]
+            return torch.log(y_pred_probs + 1e-6)
 
     def compute_temperature(self, epoch: int) -> float:
         curr_temp = max(self.init_temp * math.exp(self.temp_decay_rate * epoch), self.final_temp)
