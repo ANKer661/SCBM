@@ -85,18 +85,18 @@ def generate_synthetic_data_correlated_c(p: int, n: int, k: int, seed: int):
 
     try:
         torch.linalg.cholesky(torch.tensor(sigma))
-    except:
-        assert False, "Matrix not positive definite"
+    except RuntimeError:
+        print("Matrix not positive definite")
 
     z = multivariate_normal(mean=np.zeros((k,)), cov=sigma, size=n)
-    c = (z >= 0) * 1
+    c = (z >= 0) * 1  # (n, k)
 
     # Generate balanced labels from concepts
     lin_weights = np.random.uniform(size=(1, k))
     lin_weights = np.tile(lin_weights, (n, 1))
     y = np.sum(lin_weights * c, 1, keepdims=True)
     tmp = np.median(y, 0)
-    y = (y >= tmp) * 1
+    y = (y >= tmp) * 1  # (n, 1)
 
     # Nonlinear maps. The number of hidden units is fixed to 5 to make the task harder
     g = random_nonlin_map(
@@ -106,7 +106,7 @@ def generate_synthetic_data_correlated_c(p: int, n: int, k: int, seed: int):
     )
     # Generate covariates
     # Concept groups get mapped to one
-    X = g(z)
+    X = g(z)  # (n, p)
 
     ss = StandardScaler()
     X = ss.fit_transform(X)
@@ -131,6 +131,7 @@ class SyntheticDataset(Dataset):
         sim_type: str | None = None,
         indices: np.ndarray | None = None,
         seed: int = 42,
+        data: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
     ) -> None:
         """
         Initialize the SyntheticDataset.
@@ -144,22 +145,27 @@ class SyntheticDataset(Dataset):
             seed (int, optional): Random generator seed. Default is 42.
         """
         # Shall a partial predicate set be used?
-        self.predicate_idx = np.arange(0, num_predicates)
+        # self.predicate_idx = np.arange(0, num_predicates)
         if sim_type == "correlated_c":
             generate_synthetic_data = generate_synthetic_data_correlated_c
         else:
             raise ValueError("Simulation type not implemented!")
 
-        self.X, self.c, self.y = generate_synthetic_data(
-            p=num_vars, n=num_points, k=num_predicates, seed=seed
-        )
+        if data is None:
+            X, c, y = generate_synthetic_data(p=num_vars, n=num_points, k=num_predicates, seed=seed)
+        else:
+            X, c, y = data
 
         if indices is not None:
-            self.X = self.X[indices]
-            self.c = self.c[indices]
-            self.y = self.y[indices]
+            X = X[indices]
+            c = c[indices]
+            y = y[indices]
 
-    def __getitem__(self, index):
+        self.X = torch.as_tensor(X, dtype=torch.float32)  # (n, p)
+        self.c = torch.as_tensor(c[:, :num_predicates], dtype=torch.float32)  # (n, k)
+        self.y = torch.as_tensor(y[:, 0], dtype=torch.long)  # (n,)
+
+    def __getitem__(self, index) -> dict[str, torch.Tensor]:
         """
         Returns points from the dataset
 
@@ -167,14 +173,14 @@ class SyntheticDataset(Dataset):
         @return: a dictionary with the data; dict['features'] contains features, dict['label'] contains
         target labels, dict['concepts'] contains concepts
         """
-        labels = self.y[index, 0]
-        concepts = self.c[index, self.predicate_idx]
-        features = self.X[index].astype("f")
+        labels = self.y[index]
+        concepts = self.c[index]
+        features = self.X[index]
 
         return {"features": features, "labels": labels, "concepts": concepts}
 
-    def __len__(self):
-        return self.X.shape[0]
+    def __len__(self) -> int:
+        return self.X.size(0)
 
 
 def get_synthetic_datasets(
@@ -185,7 +191,7 @@ def get_synthetic_datasets(
     val_ratio: float = 0.2,
     seed: int = 42,
     sim_type: str | None = None,
-):
+) -> tuple[SyntheticDataset, SyntheticDataset, SyntheticDataset]:
     """
     Construct dataset objects for the synthetic data.
 
@@ -211,6 +217,18 @@ def get_synthetic_datasets(
         random_state=2 * seed,
     )
 
+    if sim_type == "correlated_c":
+        generate_synthetic_data = generate_synthetic_data_correlated_c
+    else:
+        raise ValueError("Simulation type not implemented!")
+
+    data = generate_synthetic_data(
+        p=num_vars,
+        n=num_points,
+        k=num_predicates,
+        seed=seed,
+    )
+
     # Datasets
     synthetic_datasets = {
         "train": SyntheticDataset(
@@ -220,6 +238,7 @@ def get_synthetic_datasets(
             indices=indices_train,
             seed=seed,
             sim_type=sim_type,
+            data=data,
         ),
         "val": SyntheticDataset(
             num_vars=num_vars,
@@ -228,6 +247,7 @@ def get_synthetic_datasets(
             indices=indices_val,
             seed=seed,
             sim_type=sim_type,
+            data=data,
         ),
         "test": SyntheticDataset(
             num_vars=num_vars,
@@ -236,6 +256,7 @@ def get_synthetic_datasets(
             indices=indices_test,
             seed=seed,
             sim_type=sim_type,
+            data=data,
         ),
     }
 
