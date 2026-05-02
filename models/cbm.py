@@ -3,11 +3,88 @@
 import math
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.distributions import RelaxedBernoulli
 
 from models.concept_backbones import build_encoder, build_head
 from utils.freezing import freeze_module, unfreeze_module
+
+
+class PackedARConceptPredictor(nn.Module):
+    """Batched per-concept AR predictors for teacher-forced concept training."""
+
+    def __init__(self, n_features: int, num_concepts: int, hidden_dim: int = 50) -> None:
+        super().__init__()
+        self.n_features = n_features
+        self.num_concepts = num_concepts
+        self.input_dim = n_features + num_concepts
+        self.hidden_dim = hidden_dim
+
+        self.weight1 = nn.Parameter(torch.empty(num_concepts, self.input_dim, hidden_dim))
+        self.bias1 = nn.Parameter(torch.empty(num_concepts, hidden_dim))
+        self.weight2 = nn.Parameter(torch.empty(num_concepts, hidden_dim, 1))
+        self.bias2 = nn.Parameter(torch.empty(num_concepts, 1))
+        self.concept_mask: torch.Tensor
+        self.register_buffer(
+            "concept_mask",
+            torch.tril(torch.ones(num_concepts, num_concepts), diagonal=-1),
+            persistent=False,
+        )
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        for concept_idx in range(self.num_concepts):
+            nn.init.kaiming_uniform_(self.weight1[concept_idx].transpose(0, 1), a=math.sqrt(5))
+            fan_in = self.input_dim
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias1[concept_idx], -bound, bound)
+            nn.init.kaiming_uniform_(self.weight2[concept_idx].transpose(0, 1), a=math.sqrt(5))
+            bound = 1 / math.sqrt(self.hidden_dim)
+            nn.init.uniform_(self.bias2[concept_idx], -bound, bound)
+
+    def forward_train(
+        self, intermediate: torch.Tensor, concepts_true: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Packed forward pass for training AR CBM"""
+        # intermediate: (B, n_features)
+        batch_size = intermediate.size(0)
+        features = intermediate.unsqueeze(1).expand(
+            batch_size, self.num_concepts, self.n_features
+        )  # (B, num_concepts, n_features)
+        concepts = (
+            concepts_true.float().unsqueeze(1).expand(batch_size, self.num_concepts, self.num_concepts)
+        )  # (B, num_concepts, num_concepts)
+        concepts = concepts * self.concept_mask.unsqueeze(0)
+        concept_input = torch.cat(
+            [features, concepts], dim=-1
+        )  # (B, num_concepts, n_features + num_concepts)
+
+        # view concepts as batch dimension
+        concept_input = concept_input.permute(1, 0, 2)  # (num_concepts, B, input_dim)
+        hidden = torch.bmm(concept_input, self.weight1) + self.bias1.unsqueeze(1)
+        hidden = F.leaky_relu(hidden)
+        logits = torch.bmm(hidden, self.weight2) + self.bias2.unsqueeze(1)  # (num_concepts, B, 1)
+        probs = torch.sigmoid(logits.squeeze(-1).transpose(0, 1))  # (B, num_concepts)
+        hard = torch.bernoulli(probs)
+        return probs, hard
+
+    def forward_single(
+        self,
+        intermediate: torch.Tensor,
+        previous_concepts: torch.Tensor | None,
+        concept_idx: int,
+    ) -> torch.Tensor:
+        """Forward pass for a single concept prediction in AR CBM."""
+        concept_input = intermediate.new_zeros(intermediate.size(0), self.input_dim)
+        concept_input[:, : self.n_features] = intermediate
+        if previous_concepts is not None and previous_concepts.size(1) > 0:
+            concept_input[:, self.n_features : self.n_features + concept_idx] = previous_concepts
+
+        hidden = concept_input @ self.weight1[concept_idx] + self.bias1[concept_idx]
+        hidden = F.leaky_relu(hidden)
+        logits = hidden @ self.weight2[concept_idx] + self.bias2[concept_idx]
+        return torch.sigmoid(logits)  # (B, 1)
 
 
 class CBM(nn.Module):
@@ -77,15 +154,10 @@ class CBM(nn.Module):
             self.concept_dim = self.CEM_embedding * self.num_concepts
         else:
             if self.concept_learning == "autoregressive":
-                self.concept_predictor = nn.ModuleList(
-                    [
-                        nn.Sequential(
-                            nn.Linear(n_features + i, 50, bias=True),
-                            nn.LeakyReLU(),
-                            nn.Linear(50, 1, bias=True),
-                        )
-                        for i in range(self.num_concepts)
-                    ]
+                self.concept_predictor = PackedARConceptPredictor(
+                    n_features=n_features,
+                    num_concepts=self.num_concepts,
+                    hidden_dim=50,
                 )
             else:  # Hard or Soft CBM
                 self.concept_predictor = nn.Linear(n_features, self.num_concepts, bias=True)
@@ -221,10 +293,9 @@ class CBM(nn.Module):
         return concept_probs, target_logits
 
     def _forward_ar_validation(self, intermediate: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        assert isinstance(self.concept_predictor, nn.ModuleList)
+        assert isinstance(self.concept_predictor, PackedARConceptPredictor)
 
-        first_predictor = self.concept_predictor[0]
-        concept = self.act_c(first_predictor(intermediate))  # (B, 1)
+        concept = self.concept_predictor.forward_single(intermediate, None, 0)  # (B, 1)
         concept = concept.unsqueeze(-1).expand(-1, -1, self.num_monte_carlo)  # (B, 1, num_monte_carlo)
         c = torch.bernoulli(concept)  # (B, 1, num_monte_carlo)
         c_prob = [concept]
@@ -233,14 +304,13 @@ class CBM(nn.Module):
         expanded_intermediate = intermediate.unsqueeze(1).expand(
             -1, self.num_monte_carlo, -1
         )  # (B, num_monte_carlo, n_features)
-        for predictor in self.concept_predictor[1:]:
+        for concept_idx in range(1, self.num_concepts):
             previous_concepts = c.permute(0, 2, 1)  # (B, num_monte_carlo, num_concepts_so_far)
-            concept_input = torch.cat(
-                [expanded_intermediate, previous_concepts], dim=2
-            )  # (B, num_monte_carlo, n_features + num_concepts_so_far)
-            concept = self.act_c(predictor(concept_input.reshape(B * self.num_monte_carlo, -1))).view(
-                B, self.num_monte_carlo
-            )  # (B, num_monte_carlo)
+            concept = self.concept_predictor.forward_single(
+                expanded_intermediate.reshape(B * self.num_monte_carlo, -1),
+                previous_concepts.reshape(B * self.num_monte_carlo, concept_idx),
+                concept_idx,
+            ).view(B, self.num_monte_carlo)  # (B, num_monte_carlo)
             concept = concept.unsqueeze(1)  # (B, 1, num_monte_carlo)
             concept_hard = torch.bernoulli(concept)  # (B, 1, num_monte_carlo)
             c_prob.append(concept)
@@ -252,25 +322,8 @@ class CBM(nn.Module):
     def _forward_ar_concepts_training(
         self, intermediate: torch.Tensor, concepts_train_ar: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        c_prob, c_hard = [], []
-        assert isinstance(self.concept_predictor, nn.ModuleList)
-        for c_idx, predictor in enumerate(self.concept_predictor):
-            if c_hard:
-                concept_input = torch.cat([intermediate, concepts_train_ar[:, :c_idx]], dim=1)
-            else:
-                concept_input = intermediate
-            concept = self.act_c(predictor(concept_input))
-
-            # No Gumbel softmax because backprop can happen through the input connection
-            c_relaxed = torch.bernoulli(concept)
-            concept_hard = c_relaxed
-
-            # NOTE that the following train-time variables are overly good because they are taking ground truth as input. At validation time, we sample
-            c_prob.append(concept)
-            c_hard.append(concept_hard)
-        c_prob = torch.cat([c_prob[i] for i in range(self.num_concepts)], dim=1)
-        c = torch.cat([c_hard[i] for i in range(self.num_concepts)], dim=1)
-        return c_prob, c
+        assert isinstance(self.concept_predictor, PackedARConceptPredictor)
+        return self.concept_predictor.forward_train(intermediate, concepts_train_ar)
 
     def _forward_cem(self, intermediate: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if self.training_mode != "joint":
@@ -457,23 +510,26 @@ class CBM(nn.Module):
         intermediate = self.encoder(input_features)
         c_prob, c_hard = [], []
 
-        assert isinstance(self.concept_predictor, nn.ModuleList)
-        for j, (predictor) in enumerate(self.concept_predictor):
+        assert isinstance(self.concept_predictor, PackedARConceptPredictor)
+        for j in range(self.num_concepts):
             if c_prob:
                 concept = []
                 for i in range(
                     self.num_monte_carlo
                 ):  # MCMC samples for evaluation and interventions, but not for joint training
-                    concept_input_i = torch.cat(
-                        [intermediate, torch.cat(c_hard, dim=1)[..., i]], dim=1
+                    concept_input_i = torch.cat(c_hard, dim=1)[..., i]
+                    concept.append(
+                        self.concept_predictor.forward_single(
+                            intermediate,
+                            concept_input_i,
+                            j,
+                        )
                     )
-                    concept.append(self.act_c(predictor(concept_input_i)))
                 concept = torch.cat(concept, dim=-1)
                 concept_hard = torch.bernoulli(concept)[:, None, :]
                 concept = concept[:, None, :]
             else:
-                concept_input = intermediate
-                concept = self.act_c(predictor(concept_input))
+                concept = self.concept_predictor.forward_single(intermediate, None, j)
                 concept = concept.unsqueeze(-1).expand(-1, -1, self.num_monte_carlo)
                 concept_hard = torch.bernoulli(concept)
 
