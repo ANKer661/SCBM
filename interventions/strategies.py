@@ -1,5 +1,8 @@
 """Strategies for encoding intervened concept values."""
 
+from __future__ import annotations
+import typing
+
 import torch
 from scipy.stats import chi2
 from torch import nn
@@ -9,8 +12,18 @@ import torch.nn.functional as F
 from utils.minimize_constraint import minimize_constr
 from utils.utils import numerical_stability_check
 
+if typing.TYPE_CHECKING:
+    from torch.utils.data import DataLoader
+    from omegaconf import DictConfig
 
-def define_strategy(inter_strategy, train_loader, model, device, config):
+
+def define_strategy(
+    inter_strategy: str,
+    train_loader: DataLoader,
+    model: nn.Module,
+    device: torch.device,
+    config: DictConfig,
+):
     """
     Return the intervention strategy that determines how the ground-truth intervened-on concept values are encoded in the model.
     This function selects and returns the appropriate intervention strategy based on the provided strategy name and model configuration.
@@ -35,30 +48,31 @@ def define_strategy(inter_strategy, train_loader, model, device, config):
         >>> strategy = define_strategy("simple_perc", train_loader, model, device, config)
         USING FOLLOWING STRATEGY: PercentileStrategy
     """
+
     if config.model.model == "cbm":
         if config.model.concept_learning in ("hard", "autoregressive", "embedding"):
-            inter_strategy = HardCBMStrategy()
+            strategy = HardCBMStrategy()
         elif inter_strategy == "simple_perc":
-            inter_strategy = PercentileStrategy()
+            strategy = PercentileStrategy()
         elif inter_strategy == "emp_perc":
-            inter_strategy = EmpiricalPercentileStrategy(
+            strategy = EmpiricalPercentileStrategy(
                 train_loader=train_loader, model=model, device=device
             )
-        print("USING FOLLOWING STRATEGY:", inter_strategy.__class__.__name__)
+        else:
+            raise NotImplementedError(
+                f"No such strategy as {inter_strategy} defined for model {config.model.model}!"
+            )
+        print("USING FOLLOWING STRATEGY:", strategy.__class__.__name__)
 
     elif config.model.model == "scbm":
-        inter_strategy = SCBM_Strategy(inter_strategy, train_loader, model, device, config)
-        print("USING FOLLOWING STRATEGY:", inter_strategy.interv_strat.__class__.__name__)
+        strategy = SCBM_Strategy(inter_strategy, train_loader, model, device, config)
+        print("USING FOLLOWING STRATEGY:", strategy.interv_strat.__class__.__name__)
     else:
         raise NotImplementedError(
-            "No such strategy as",
-            config.model.inter_strategy,
-            "defined for model",
-            config.model.model,
-            "!",
+            f"No such strategy as {inter_strategy} defined for model {config.model.model}!"
         )
 
-    return inter_strategy
+    return strategy
 
 
 class SCBM_Strategy:
