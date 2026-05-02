@@ -20,11 +20,11 @@ from models.factory import create_model
 from datasets.datamodule import build_dataloaders
 from training.adapters import create_adapter
 from training.epoch import train_one_epoch, validate_one_epoch
-from training.freezing import freeze_module
 from training.logging import finish_wandb, setup_wandb
 from training.metrics import Custom_Metrics
 from training.optim import build_optimizer, build_scheduler
 from training.stages import apply_freeze_policy, apply_stage_cleanup, build_stage_plan
+from utils.freezing import freeze_module
 from utils.utils import numerical_stability_check
 from utils.utils import reset_random_seeds
 

@@ -8,10 +8,11 @@ The staged training path has been refactored into:
 - `training/adapters.py` for model-specific batch behavior.
 - `training/optim.py` for optimizer/scheduler construction.
 - `training/metrics.py` for `Custom_Metrics`.
-- `training/freezing.py` for freeze/unfreeze helpers.
+- `utils/freezing.py` for freeze/unfreeze helpers.
 
 This module is kept for compatibility with the original training functions and
-older imports. New staged-training code should import from `training.*`.
+older imports. New staged-training code should import from `training.*` or
+`utils.freezing`.
 """
 
 import numpy as np

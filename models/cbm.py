@@ -7,7 +7,7 @@ from torch import nn
 from torch.distributions import RelaxedBernoulli
 
 from models.concept_backbones import build_encoder, build_head
-from training.freezing import freeze_module, unfreeze_module
+from utils.freezing import freeze_module, unfreeze_module
 
 
 class CBM(nn.Module):

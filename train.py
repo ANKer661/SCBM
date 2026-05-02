@@ -8,7 +8,7 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig
 
-from training.runner import ExperimentRunner
+from training import ExperimentRunner
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")

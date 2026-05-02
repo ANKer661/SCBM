@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from training.freezing import freeze_module, unfreeze_module
+from utils.freezing import freeze_module, unfreeze_module
 
 StageMode = Literal["c", "t", "j"]
 FreezePolicy = Literal["concept_pretrain", "concept_only", "target_only", "joint"]

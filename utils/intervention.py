@@ -14,18 +14,16 @@ from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 import wandb
 
-from interventions.policies import (
-    ProbUncertaintyInterventionPolicy,
-    RandomSubsetInterventionPolicy,
-    define_policy,
-)
-from interventions.strategies import (
+from interventions import (
     ConfIntervalOptimalStrategy,
     EmpiricalPercentileStrategy,
     HardCBMStrategy,
     PercentileStrategy,
+    ProbUncertaintyInterventionPolicy,
+    RandomSubsetInterventionPolicy,
     SCBM_Strategy,
     define_strategy,
+    define_policy,
 )
 from utils.utils import numerical_stability_check
 

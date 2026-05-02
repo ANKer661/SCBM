@@ -1,4 +1,4 @@
-"""Parameter freezing helpers for staged training."""
+"""Module parameter freezing helpers."""
 
 
 def freeze_module(module) -> None:
