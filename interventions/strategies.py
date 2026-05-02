@@ -133,7 +133,7 @@ class SCBMConditionalStrategy:
             tuple: A tuple containing the intervened-on concept means, covariances, MCMC sampled concept probabilities, and logits.
                     Note that the probabilities are set to 0/1 for the intervened-on concepts according to the ground-truth.
         """
-        num_intervened = c_mask.sum(1)[0]
+        num_intervened = int(c_mask[0].sum().item())
         device = c_mask.device
 
         if num_intervened == 0:
