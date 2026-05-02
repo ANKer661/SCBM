@@ -18,6 +18,7 @@ def reset_random_seeds(seed):
     torch.backends.cudnn.benchmark = False
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+    torch.set_float32_matmul_precision("high")
     os.environ["PYTHONHASHSEED"] = str(seed)
     gen = torch.manual_seed(seed)
     return gen
@@ -46,11 +47,7 @@ def numerical_stability_check(cov, device, epsilon=1e-6):
             # Attempt Cholesky decomposition; if it fails, the matrix is not positive definite
             torch.linalg.cholesky(cov)
             if num_added > 0.0001:
-                print(
-                    "Added {} to the diagonal of the covariance matrix.".format(
-                        num_added
-                    )
-                )
+                print("Added {} to the diagonal of the covariance matrix.".format(num_added))
             break
         except RuntimeError:
             # Add epsilon to the diagonal
