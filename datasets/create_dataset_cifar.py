@@ -96,11 +96,11 @@ for split in [False, True]:
 
     if cifar == "cifar10":
         cifar_data = torchvision.datasets.CIFAR10(
-            root=f"../datasets/{cifar}", train=split, transform=transform, download=True
+            root=f"./data/{cifar}", train=split, transform=transform, download=True
         )
     else:
         cifar_data = torchvision.datasets.CIFAR100(
-            root=f"../datasets/{cifar}", train=split, transform=transform, download=True
+            root=f"./data/{cifar}", train=split, transform=transform, download=True
         )
     data_loader = torch.utils.data.DataLoader(
         cifar_data,
