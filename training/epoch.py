@@ -7,7 +7,7 @@ import wandb
 from training.adapters import BatchTensors
 
 
-def move_batch_to_device(batch, device):
+def move_batch_to_device(batch, device) -> BatchTensors:
     return BatchTensors(
         features=batch["features"].to(device),
         targets=batch["labels"].to(device),
@@ -15,7 +15,7 @@ def move_batch_to_device(batch, device):
     )
 
 
-def train_one_epoch(loader, adapter, optimizer, stage, metrics, epoch, device):
+def train_one_epoch(loader, adapter, optimizer, stage, metrics, epoch, device) -> None:
     adapter.prepare_train(stage)
     metrics.reset()
 
@@ -31,7 +31,7 @@ def train_one_epoch(loader, adapter, optimizer, stage, metrics, epoch, device):
         adapter.backward_loss(losses, stage).backward()
         optimizer.step()
 
-        adapter.update_metrics(metrics, losses, batch, output)
+        adapter.update_metrics(metrics, losses, batch, output, validation=False)
 
     metrics_dict = metrics.compute()
     wandb.log({f"train/{k}": v for k, v in metrics_dict.items()})
@@ -54,7 +54,7 @@ def validate_one_epoch(
     device,
     test=False,
     concept_names_graph=None,
-):
+) -> None:
     adapter.model.eval()
     metrics.reset()
 
@@ -77,7 +77,7 @@ def validate_one_epoch(
                 )
 
             losses = adapter.compute_loss(output, batch)
-            adapter.update_metrics(metrics, losses, batch, output)
+            adapter.update_metrics(metrics, losses, batch, output, validation=True)
 
     if last_batch_idx == -1:
         raise ValueError("Cannot validate on an empty dataloader.")

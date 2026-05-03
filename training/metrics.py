@@ -37,6 +37,10 @@ class Custom_Metrics(Metric):
         self.cov_norm: torch.Tensor
         self.add_state("cov_norm", default=torch.tensor(0.0, device=device))
         self.add_state("n_samples", default=torch.tensor(0, dtype=torch.int, device=device))
+        self.y_correct: torch.Tensor
+        self.add_state("y_correct", default=torch.tensor(0, dtype=torch.int, device=device))
+        self.c_correct: torch.Tensor
+        self.add_state("c_correct", default=torch.tensor(0, dtype=torch.int, device=device))
         self.prec_loss: torch.Tensor
         self.add_state("prec_loss", default=torch.tensor(0.0, device=device))
 
@@ -51,24 +55,52 @@ class Custom_Metrics(Metric):
         c_pred_probs: torch.Tensor,
         cov_norm: torch.Tensor | None = None,
         prec_loss: torch.Tensor | None = None,
+        validation: bool = False,
     ) -> None:
         assert c_true.shape == c_pred_probs.shape
 
         n_samples = y_true.size(0)
         self.n_samples += n_samples
-        self.target_loss += target_loss * n_samples
-        self.concepts_loss += concepts_loss * n_samples
-        self.total_loss += total_loss * n_samples
-        self.y_true.append(y_true)
-        self.y_pred_logits.append(y_pred_logits.detach())
-        self.c_true.append(c_true)
-        self.c_pred_probs.append(c_pred_probs.detach())
+        self.target_loss += target_loss.detach() * n_samples
+        self.concepts_loss += concepts_loss.detach() * n_samples
+        self.total_loss += total_loss.detach() * n_samples
+
+        with torch.no_grad():
+            c_pred = c_pred_probs > 0.5
+            self.c_correct += (c_true.bool() == c_pred).sum()
+            if y_pred_logits.size(1) == 1:
+                # y_pred = torch.sigmoid(y_pred_logits.squeeze(-1)) > 0.5
+                y_pred = (y_pred_logits > 0).squeeze(-1)
+                y_true_for_acc = y_true.bool()
+            else:
+                y_pred = y_pred_logits.argmax(dim=-1)
+                y_true_for_acc = y_true
+            self.y_correct += (y_true_for_acc == y_pred).sum()
+
+        if validation:
+            self.y_true.append(y_true)
+            self.y_pred_logits.append(y_pred_logits.detach())
+            self.c_true.append(c_true)
+            self.c_pred_probs.append(c_pred_probs.detach())
         if cov_norm is not None:
-            self.cov_norm += cov_norm * n_samples
+            self.cov_norm += cov_norm.detach() * n_samples
         if prec_loss is not None:
-            self.prec_loss += prec_loss * n_samples
+            self.prec_loss += prec_loss.detach() * n_samples
 
     def compute(self, validation: bool = False, config: DictConfig | None = None) -> dict:
+        if not validation:
+            metrics = {
+                "target_loss": self.target_loss / self.n_samples,
+                "prec_loss": self.prec_loss / self.n_samples,
+                "concepts_loss": self.concepts_loss / self.n_samples,
+                "total_loss": self.total_loss / self.n_samples,
+                "y_accuracy": self.y_correct / self.n_samples,
+                "c_accuracy": self.c_correct / (self.n_samples * self.n_concepts),
+            }
+            if self.cov_norm != 0:
+                metrics = metrics | {"covariance_norm": self.cov_norm / self.n_samples}
+            return metrics
+
         y_true = torch.cat(self.y_true, dim=0).cpu()
         c_true = torch.cat(self.c_true, dim=0).cpu()
         c_pred_probs = torch.cat(self.c_pred_probs, dim=0).cpu()

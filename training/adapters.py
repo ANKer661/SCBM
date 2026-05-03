@@ -104,7 +104,12 @@ class CBMAdapter:
         return losses.target_loss
 
     def update_metrics(
-        self, metrics: Metric, losses: LossOutput, batch: BatchTensors, output: BatchOutput
+        self,
+        metrics: Metric,
+        losses: LossOutput,
+        batch: BatchTensors,
+        output: BatchOutput,
+        validation: bool,
     ) -> None:
         metrics.update(
             losses.target_loss,
@@ -114,6 +119,7 @@ class CBMAdapter:
             output.target_logits,
             batch.concepts,
             output.concept_probs,
+            validation=validation,
         )
 
     def maybe_plot_test_batch(
@@ -186,7 +192,12 @@ class SCBMAdapter:
         return losses.target_loss
 
     def update_metrics(
-        self, metrics: Metric, losses: LossOutput, batch: BatchTensors, output: BatchOutput
+        self,
+        metrics: Metric,
+        losses: LossOutput,
+        batch: BatchTensors,
+        output: BatchOutput,
+        validation: bool,
     ) -> None:
         assert losses.precision_matrix_loss is not None
         metrics.update(
@@ -198,6 +209,7 @@ class SCBMAdapter:
             batch.concepts,
             output.concept_probs.mean(-1),
             prec_loss=losses.precision_matrix_loss,
+            validation=validation,
         )
 
     def maybe_plot_test_batch(
