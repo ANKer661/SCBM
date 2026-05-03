@@ -21,7 +21,7 @@ cifar = "cifar10"  # SET THIS TO THE SPECIFIC DATASET YOU WANT TO USE
 
 model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
 processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-with open(f"../datasets/{cifar}/{cifar}_filtered.txt", "r") as file:
+with open(f"./data/{cifar}/{cifar}_filtered.txt", "r") as file:
     # Read the contents of the file
     concept_list = [line.strip() for line in file]
 # Adding negated concepts
@@ -49,11 +49,11 @@ transform = CustomTransform(processor)
 # Load imagenet from folder
 if cifar == "cifar10":
     cifar_data = torchvision.datasets.CIFAR10(
-        root=f"../datasets/{cifar}", train=True, transform=transform, download=True
+        root=f"./data/{cifar}", train=True, transform=transform, download=True
     )
 else:
     cifar_data = torchvision.datasets.CIFAR100(
-        root=f"../datasets/{cifar}", train=True, transform=transform, download=True
+        root=f"./data/{cifar}", train=True, transform=transform, download=True
     )
 data_loader = torch.utils.data.DataLoader(
     cifar_data,
