@@ -39,8 +39,7 @@ def build_CIFAR10_CBM_datasets(datapath):
 
 
 class CIFAR10CBMDataset(datasets.CIFAR10):
-
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super(CIFAR10CBMDataset, self).__init__(*args, **kwargs)
 
         if kwargs["train"]:
@@ -50,29 +49,29 @@ class CIFAR10CBMDataset(datasets.CIFAR10):
                     transforms.Resize(size=(224, 224)),
                     transforms.RandomHorizontalFlip(),
                     transforms.ToTensor(),  # implicitly divides by 255
-                    transforms.Normalize(
-                        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                    ),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                 ]
             )
-            self.concepts = (
-                torch.load(kwargs["root"] + f"cifar10_train_concept_labels.pt") * 1
+            self.concepts = torch.load(
+                kwargs["root"] + "cifar10_train_concept_labels.pt",
+                map_location="cpu",
+                weights_only=True,
             )
         else:
             self.transform = transforms.Compose(
                 [
                     transforms.Resize(size=(224, 224)),
                     transforms.ToTensor(),  # implicitly divides by 255
-                    transforms.Normalize(
-                        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                    ),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                 ]
             )
-            self.concepts = (
-                torch.load(kwargs["root"] + f"cifar10_test_concept_labels.pt") * 1
+            self.concepts = torch.load(
+                kwargs["root"] + "cifar10_test_concept_labels.pt",
+                map_location="cpu",
+                weights_only=True,
             )
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         X, target = super().__getitem__(idx)
 
         return {
