@@ -295,28 +295,30 @@ class CBM(nn.Module):
     def _forward_ar_validation(self, intermediate: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         assert isinstance(self.concept_predictor, PackedARConceptPredictor)
 
-        concept = self.concept_predictor.forward_single(intermediate, None, 0)  # (B, 1)
-        concept = concept.unsqueeze(-1).expand(-1, -1, self.num_monte_carlo)  # (B, 1, num_monte_carlo)
-        c = torch.bernoulli(concept)  # (B, 1, num_monte_carlo)
-        c_prob = [concept]
-
-        B = concept.size(0)
+        B = intermediate.size(0)
+        c_prob = intermediate.new_empty(B, self.num_concepts, self.num_monte_carlo)
+        c = intermediate.new_empty(B, self.num_concepts, self.num_monte_carlo)
         expanded_intermediate = intermediate.unsqueeze(1).expand(
             -1, self.num_monte_carlo, -1
         )  # (B, num_monte_carlo, n_features)
+
+        concept = self.concept_predictor.forward_single(intermediate, None, 0)  # (B, 1)
+        concept = concept.expand(-1, self.num_monte_carlo)  # (B, num_monte_carlo)
+        c_prob[:, 0, :] = concept
+        c[:, 0, :] = torch.bernoulli(concept)
+
         for concept_idx in range(1, self.num_concepts):
-            previous_concepts = c.permute(0, 2, 1)  # (B, num_monte_carlo, num_concepts_so_far)
+            previous_concepts = c[:, :concept_idx, :].permute(
+                0, 2, 1
+            )  # (B, num_monte_carlo, num_concepts_so_far)
             concept = self.concept_predictor.forward_single(
                 expanded_intermediate.reshape(B * self.num_monte_carlo, -1),
                 previous_concepts.reshape(B * self.num_monte_carlo, concept_idx),
                 concept_idx,
             ).view(B, self.num_monte_carlo)  # (B, num_monte_carlo)
-            concept = concept.unsqueeze(1)  # (B, 1, num_monte_carlo)
-            concept_hard = torch.bernoulli(concept)  # (B, 1, num_monte_carlo)
-            c_prob.append(concept)
-            c = torch.cat([c, concept_hard], dim=1)  # (B, num_concepts_so_far + 1, num_monte_carlo)
+            c_prob[:, concept_idx, :] = concept
+            c[:, concept_idx, :] = torch.bernoulli(concept)
 
-        c_prob = torch.cat(c_prob, dim=1)  # (B, num_concepts, num_monte_carlo)
         return c_prob, c
 
     def _forward_ar_concepts_training(
@@ -508,45 +510,42 @@ class CBM(nn.Module):
         """
         # Concept predictions for autoregressive model. Intervened-on concepts are fixed to ground truth
         intermediate = self.encoder(input_features)
-        c_prob, c_hard = [], []
+        batch_size = intermediate.size(0)
+        c_prob = intermediate.new_empty(batch_size, self.num_concepts, self.num_monte_carlo)
+        c_hard = intermediate.new_empty(batch_size, self.num_concepts, self.num_monte_carlo)
+        expanded_intermediate = intermediate.unsqueeze(1).expand(
+            -1, self.num_monte_carlo, -1
+        )
 
         assert isinstance(self.concept_predictor, PackedARConceptPredictor)
         for j in range(self.num_concepts):
-            if c_prob:
-                concept = []
-                for i in range(
-                    self.num_monte_carlo
-                ):  # MCMC samples for evaluation and interventions, but not for joint training
-                    concept_input_i = torch.cat(c_hard, dim=1)[..., i]
-                    concept.append(
-                        self.concept_predictor.forward_single(
-                            intermediate,
-                            concept_input_i,
-                            j,
-                        )
-                    )
-                concept = torch.cat(concept, dim=-1)
-                concept_hard = torch.bernoulli(concept)[:, None, :]
-                concept = concept[:, None, :]
+            if j > 0:
+                previous_concepts = c_hard[:, :j, :].permute(
+                    0, 2, 1
+                )  # (B, num_monte_carlo, num_concepts_so_far)
+                concept = self.concept_predictor.forward_single(
+                    expanded_intermediate.reshape(batch_size * self.num_monte_carlo, -1),
+                    previous_concepts.reshape(batch_size * self.num_monte_carlo, j),
+                    j,
+                ).view(batch_size, self.num_monte_carlo)
             else:
                 concept = self.concept_predictor.forward_single(intermediate, None, j)
-                concept = concept.unsqueeze(-1).expand(-1, -1, self.num_monte_carlo)
-                concept_hard = torch.bernoulli(concept)
+                concept = concept.expand(-1, self.num_monte_carlo)
+
+            concept_hard = torch.bernoulli(concept)
 
             concept_hard = (
-                concept_hard * (1 - concepts_mask[:, j, :])[:, None, :]
-                + concepts_mask[:, j, :][:, None, :] * concepts_true[:, j, :][:, None, :]
+                concept_hard * (1 - concepts_mask[:, j, :])
+                + concepts_mask[:, j, :] * concepts_true[:, j, :]
             )  # Only update if it is not an intervened on
             concept = (
-                concept * (1 - concepts_mask[:, j, :][:, None, :])
-                + concepts_mask[:, j, :][:, None, :] * concepts_true[:, j, :][:, None, :]
+                concept * (1 - concepts_mask[:, j, :])
+                + concepts_mask[:, j, :] * concepts_true[:, j, :]
             )
 
-            c_prob.append(concept)
-            c_hard.append(concept_hard)
-        c_prob = torch.cat([c_prob[i] for i in range(self.num_concepts)], dim=1)
-        c = torch.cat([c_hard[i] for i in range(self.num_concepts)], dim=1)
-        return c_prob, c
+            c_prob[:, j, :] = concept
+            c_hard[:, j, :] = concept_hard
+        return c_prob, c_hard
 
     def compute_temperature(self, epoch: int) -> float:
         final_temp = 0.5
