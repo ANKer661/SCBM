@@ -138,4 +138,4 @@ for split in [False, True]:
         name = "train"
     else:
         name = "test"
-    torch.save(data_storage, f"../datasets/{cifar}/{cifar}_{name}_concept_labels.pt")
+    torch.save(data_storage, f"./data/{cifar}/{cifar}_{name}_concept_labels.pt")
