@@ -63,11 +63,13 @@ class SCBM(nn.Module):
         # buffer for sigma
         self.cov_rows: torch.Tensor
         self.cov_cols: torch.Tensor
-        self.cov_diag_idx: torch.Tensor
+        self.cov_diag_mask: torch.Tensor
+        self.cov_diag_range: torch.Tensor
         rows, cols = torch.tril_indices(row=self.num_concepts, col=self.num_concepts, offset=0)
         self.register_buffer("cov_rows", rows, persistent=False)
         self.register_buffer("cov_cols", cols, persistent=False)
-        self.register_buffer("cov_diag_idx", rows == cols, persistent=False)
+        self.register_buffer("cov_diag_mask", rows == cols, persistent=False)
+        self.register_buffer("cov_diag_range", torch.arange(self.num_concepts), persistent=False)
 
         self.init_temp = 1.0
         self.final_temp = 0.5
@@ -148,17 +150,18 @@ class SCBM(nn.Module):
         intermediate = self.encoder(x)
 
         # Get mu and cholesky decomposition of covariance
+        B = x.size(0)
         c_mu = self.mu_concepts(intermediate)
         if self.cov_type == "global":
             assert isinstance(self.sigma_concepts, nn.Parameter), (
                 "sigma_concepts must be a learnable parameter for global covariance."
             )
-            c_sigma = self.sigma_concepts.repeat(c_mu.size(0), 1)
+            c_sigma = self.sigma_concepts.repeat(B, 1)
         elif self.cov_type == "empirical":
             assert isinstance(self.sigma_concepts, torch.Tensor), (
                 "sigma_concepts must be a fixed tensor for empirical covariance."
             )
-            c_sigma = self.sigma_concepts.unsqueeze(0).repeat(c_mu.size(0), 1, 1)
+            c_sigma = self.sigma_concepts.unsqueeze(0).repeat(B, 1, 1)
         else:
             assert isinstance(self.sigma_concepts, nn.Linear), (
                 "sigma_concepts must be a linear layer for amortized covariance."
@@ -170,12 +173,12 @@ class SCBM(nn.Module):
         else:
             # Fill the lower triangle of the covariance matrix with the values and make diagonal positive
             c_triang_cov = torch.zeros(
-                (c_sigma.shape[0], self.num_concepts, self.num_concepts),
+                (B, self.num_concepts, self.num_concepts),
                 device=c_sigma.device,
             )
             c_triang_cov[:, self.cov_rows, self.cov_cols] = c_sigma
-            c_triang_cov[:, range(self.num_concepts), range(self.num_concepts)] = (
-                F.softplus(c_sigma[:, self.cov_diag_idx]) + 1e-6
+            c_triang_cov[:, self.cov_diag_range, self.cov_diag_range] = (
+                F.softplus(c_sigma[:, self.cov_diag_mask]) + 1e-6
             )
 
         # Sample from predicted normal distribution
