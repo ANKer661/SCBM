@@ -1,13 +1,25 @@
 """Generic epoch loops for staged training."""
 
-from tqdm import tqdm
+from __future__ import annotations
+
+import typing
+
 import torch
 import wandb
+from tqdm import tqdm
 
 from training.adapters import BatchTensors
 
+if typing.TYPE_CHECKING:
+    from omegaconf import DictConfig
+    from torch.utils.data import DataLoader
+    from torchmetrics import Metric
 
-def move_batch_to_device(batch, device) -> BatchTensors:
+    from training.adapters import CBMAdapter, SCBMAdapter
+    from training.stages import TrainingStage
+
+
+def move_batch_to_device(batch: dict, device: torch.device) -> BatchTensors:
     return BatchTensors(
         features=batch["features"].to(device),
         targets=batch["labels"].to(device),
@@ -15,7 +27,15 @@ def move_batch_to_device(batch, device) -> BatchTensors:
     )
 
 
-def train_one_epoch(loader, adapter, optimizer, stage, metrics, epoch, device) -> None:
+def train_one_epoch(
+    loader: DataLoader,
+    adapter: CBMAdapter | SCBMAdapter,
+    optimizer: torch.optim.Optimizer,
+    stage: TrainingStage,
+    metrics: Metric,
+    epoch: int,
+    device: torch.device,
+) -> None:
     adapter.prepare_train(stage)
     metrics.reset()
 
@@ -46,14 +66,14 @@ def train_one_epoch(loader, adapter, optimizer, stage, metrics, epoch, device) -
 
 
 def validate_one_epoch(
-    loader,
-    adapter,
-    metrics,
-    epoch,
-    config,
-    device,
-    test=False,
-    concept_names_graph=None,
+    loader: DataLoader,
+    adapter: CBMAdapter | SCBMAdapter,
+    metrics: Metric,
+    epoch: int,
+    config: DictConfig,
+    device: torch.device,
+    test: bool = False,
+    concept_names_graph: list[str] | None = None,
 ) -> None:
     adapter.model.eval()
     metrics.reset()
@@ -67,6 +87,9 @@ def validate_one_epoch(
             output = adapter.forward_eval(batch, epoch)
 
             if test:
+                assert concept_names_graph is not None, (
+                    "concept_names_graph must be provided for test plotting."
+                )
                 adapter.maybe_plot_test_batch(
                     output,
                     batch,
