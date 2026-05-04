@@ -1,5 +1,5 @@
 """
-CUB dataset loader with concept labels. 
+CUB dataset loader with concept labels.
 
 This module provides a custom DataLoader for the CUB dataset, including concept labels for training, validation, and testing.
 The dataset is preprocessed with transformations.
@@ -11,20 +11,6 @@ Functions:
     train_test_split_CUB: Perform train-validation-test split for the CUB dataset according the predefined photographer-specific partitions.
     get_CUB_dataloaders: Get DataLoaders for the CUB dataset.
 """
-
-"""
-CIFAR-100 dataset loader Relies on create_dataset_cifar.py to have generated concept labels.
-
-This module provides a custom DataLoader for the CIFAR-100 dataset, including concept labels for training, validation, and testing.
-The dataset is preprocessed with transformations.
-
-Classes:
-    CIFAR100_CBM_dataloader: Custom DataLoader for CIFAR-100 with concept labels.
-
-Functions:
-    get_CIFAR100_CBM_dataloader: Returns DataLoaders for training, validation, and testing splits.
-"""
-
 
 import ctypes
 import multiprocessing as mp
@@ -38,65 +24,60 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 
-class CUB_DatasetGenerator(Dataset): 
+class CUB_DatasetGenerator(Dataset):
     """CUB Dataset object with caching"""
- 
-    def __init__(self, data_pkl, transform=None, cache=False): 
-        """ 
-        Arguments: 
+
+    def __init__(self, data_pkl, transform=None, cache=False):
+        """
+        Arguments:
         data_pkl: list of data dictionaries containing img_path, class_label, attribute_label
-        transform: whether to apply any special transformation. Default = None, i.e. use standard ImageNet preprocessing 
+        transform: whether to apply any special transformation. Default = None, i.e. use standard ImageNet preprocessing
         cache: Whether to cache the dataset in shared system RAM.
-        """ 
-        self.data = data_pkl 
-        self.transform = transform 
+        """
+        self.data = data_pkl
+        self.transform = transform
         self.cache = cache
 
-        num_samples = len(data_pkl) 
-        
-        # Maximum possible dimensions from CUB 
-        max_height = 500 
-        max_width = 500 
-        data_dims = (3, max_height, max_width) 
-        dimension = int(np.prod(data_dims)) 
-        
+        num_samples = len(data_pkl)
+
+        # Maximum possible dimensions from CUB
+        max_height = 500
+        max_width = 500
+        data_dims = (3, max_height, max_width)
+        dimension = int(np.prod(data_dims))
+
         if self.cache:
             # Create shared array for image data (padded to max size)
-            shared_array_base = mp.Array(
-                ctypes.c_uint8, num_samples * dimension 
-            ) 
-            shared_array = np.ctypeslib.as_array(shared_array_base.get_obj()) 
-            shared_array = shared_array.reshape(num_samples, *data_dims) 
+            shared_array_base = mp.Array(ctypes.c_uint8, num_samples * dimension)
+            shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
+            shared_array = shared_array.reshape(num_samples, *data_dims)
             self.image_cache = torch.from_numpy(shared_array)
-            
+
             # Create shared array for image dimensions and validity
             # Format: [height, width] per image, initialized to [-1, -1] (invalid)
             dims_array_base = mp.Array(
-                ctypes.c_int, num_samples * 2  # 2 values per image: height, width
+                ctypes.c_int,
+                num_samples * 2,  # 2 values per image: height, width
             )
             dims_array = np.ctypeslib.as_array(dims_array_base.get_obj())
             dims_array = dims_array.reshape(num_samples, 2)
             self.dims_cache = torch.from_numpy(dims_array)
             self.dims_cache.fill_(-1)  # Initialize to -1 to indicate not cached
-            
+
             # CUB has 112 binary attributes - we need 112 bits = 14 bytes per sample
             # We'll use 15 bytes (120 bits) for easier alignment and future expansion
             attr_size = len(data_pkl[0]["attribute_label"])
             self.num_attributes = attr_size
             bytes_per_sample = (attr_size + 7) // 8  # Round up to nearest byte
 
-            attr_array_base = mp.Array(
-                ctypes.c_uint8, num_samples * bytes_per_sample
-            )
+            attr_array_base = mp.Array(ctypes.c_uint8, num_samples * bytes_per_sample)
             attr_array = np.ctypeslib.as_array(attr_array_base.get_obj())
             attr_array = attr_array.reshape(num_samples, bytes_per_sample)
             self.attr_cache = torch.from_numpy(attr_array)
             self.attr_cache.fill_(0)  # Initialize to 0
-            
+
             # Create shared array for class labels
-            label_array_base = mp.Array(
-                ctypes.c_int, num_samples
-            )
+            label_array_base = mp.Array(ctypes.c_int, num_samples)
             label_array = np.ctypeslib.as_array(label_array_base.get_obj())
             self.label_cache = torch.from_numpy(label_array)
             self.label_cache.fill_(-1)  # Initialize to -1 to indicate not cached
@@ -104,42 +85,42 @@ class CUB_DatasetGenerator(Dataset):
     def _pack_attributes(self, attributes):
         """
         Pack binary attributes into bytes.
-        
+
         Args:
             attributes: numpy array of binary values (0 or 1)
-        
+
         Returns:
             Packed byte array
         """
         # Ensure attributes are binary
         attributes = np.array(attributes, dtype=np.uint8)
         attributes = np.clip(attributes, 0, 1)  # Ensure binary
-        
+
         # Calculate number of bytes needed
         n_bytes = (len(attributes) + 7) // 8
         packed = np.zeros(n_bytes, dtype=np.uint8)
-        
+
         # Pack bits into bytes
         for i, attr in enumerate(attributes):
             if attr:
                 byte_idx = i // 8
                 bit_idx = i % 8
-                packed[byte_idx] |= (1 << bit_idx)
-        
+                packed[byte_idx] |= 1 << bit_idx
+
         return packed
-    
+
     def _unpack_attributes(self, packed_bytes):
         """
         Unpack bytes into binary attributes.
-        
+
         Args:
             packed_bytes: byte array
-        
+
         Returns:
             numpy array of binary values (0 or 1)
         """
         attributes = np.zeros(self.num_attributes, dtype=np.float64)
-        
+
         for i in range(self.num_attributes):
             byte_idx = i // 8
             bit_idx = i % 8
@@ -147,7 +128,7 @@ class CUB_DatasetGenerator(Dataset):
                 bit_value = (packed_bytes[byte_idx] >> bit_idx) & 1
                 # Store as float64 to match original
                 attributes[i] = float(bit_value)
-        
+
         # Return as float32 for consistency with model expectations
         return attributes.astype(np.float32)
 
@@ -160,78 +141,83 @@ class CUB_DatasetGenerator(Dataset):
     def _cache_image(self, index, image_pil, image_attr, image_label):
         """Cache an image and its metadata in the shared arrays"""
         # Convert PIL image to numpy array
-        img_array = np.array(image_pil)
+        img_array = np.array(image_pil)  # np.ndarray, uint8, shape (H, W, 3)
         h, w = img_array.shape[:2]
-        
+
         # Store dimensions
         self.dims_cache[index] = torch.tensor([h, w])
-        
+
         # Pad image to maximum size if necessary
         if len(img_array.shape) == 2:  # Grayscale
             img_array = np.stack([img_array] * 3, axis=-1)  # Convert to RGB
-        
+
         # Convert to CHW format and pad
-        img_tensor = torch.from_numpy(img_array).permute(2, 0, 1)  # HWC -> CHW
-        
+        img_tensor = torch.from_numpy(img_array).permute(2, 0, 1)  # torch.uint8, shape (3, H, W)
+
         # Pad to maximum size
         padded_img = torch.zeros((3, 500, 500), dtype=torch.uint8)
         padded_img[:, :h, :w] = img_tensor
-        
+
         # Store in cache
         self.image_cache[index] = padded_img
-        
+
         # Pack and store attributes
-        packed_attrs = self._pack_attributes(image_attr)
+        packed_attrs = self._pack_attributes(
+            image_attr
+        )  # np.ndarray, uint8, shape (ceil(num_attrs / 8),)
         self.attr_cache[index] = torch.from_numpy(packed_attrs)
-        
+
         self.label_cache[index] = image_label
 
     def _get_cached_image(self, index):
         """Retrieve a cached image with its original dimensions"""
-        h, w = self.dims_cache[index]
+        h, w = self.dims_cache[index]  # torch.int32 scalars
         h, w = int(h), int(w)
-        
+
         # Extract the image without padding
-        img_tensor = self.image_cache[index][:, :h, :w]  # CHW format
-        
+        img_tensor = self.image_cache[index][:, :h, :w]  # torch.uint8, shape (3, H, W)
+
         # Convert back to PIL Image (HWC format)
-        img_array = img_tensor.permute(1, 2, 0).numpy()  # CHW -> HWC
+        img_array = img_tensor.permute(1, 2, 0).numpy()  # np.ndarray, uint8, shape (H, W, 3)
         image_pil = Image.fromarray(img_array)
-        
+
         # Unpack attributes
-        packed_attrs = self.attr_cache[index].numpy()
-        image_attr = self._unpack_attributes(packed_attrs)
-        
-        image_label = int(self.label_cache[index])
-        
+        packed_attrs = self.attr_cache[index].numpy()  # np.ndarray, uint8, packed bits
+        image_attr = self._unpack_attributes(packed_attrs)  # np.ndarray, float32, shape (num_attrs,)
+
+        image_label = int(self.label_cache[index])  # Python int
+
         return image_pil, image_attr, image_label
 
-    def __getitem__(self, index): 
+    def __getitem__(self, index):
         # Check if already cached
         if self._is_cached(index):
             image_data, image_attr, image_label = self._get_cached_image(index)
-        else: 
-            img_data = self.data[index] 
-            img_path = img_data["img_path"] 
-            image_data = Image.open(img_path).convert("RGB") 
-            image_label = img_data["class_label"] 
-            image_attr = np.array(img_data["attribute_label"])
-            
+        else:
+            img_data = self.data[index]
+            img_path = img_data["img_path"]
+            image_data = Image.open(img_path).convert("RGB")  # PIL.Image.Image, RGB
+            image_label = img_data["class_label"]  # Python int
+            # keep the uncached path dtype == to the cached path
+            image_attr = np.asarray(
+                img_data["attribute_label"], dtype=np.float32
+            )  # np.ndarray, float32, shape (num_attrs,)
+
             if self.cache:
                 self._cache_image(index, image_data, image_attr, image_label)
-        
-        if self.transform is not None: 
-            image_data = self.transform(image_data) 
- 
-        # Return a tuple of images, labels, and protected attributes 
-        return { 
-            "img_code": index, 
-            "labels": image_label, 
-            "features": image_data, 
+
+        if self.transform is not None:
+            image_data = self.transform(image_data)  # torch.float32, shape (3, 224, 224)
+
+        # Return a tuple of images, labels, and protected attributes
+        return {
+            "img_code": index,
+            "labels": image_label,
+            "features": image_data,
             "concepts": image_attr,  # This is now float32 array as expected
         }
- 
-    def __len__(self): 
+
+    def __len__(self):
         return len(self.data)
 
 
@@ -245,9 +231,7 @@ def train_test_split_CUB(root_dir):
     data_train.extend(
         pickle.load(
             open(
-                os.path.join(
-                    root_dir, "CUB/CUB_processed/class_attr_data_10/train.pkl"
-                ),
+                os.path.join(root_dir, "CUB/CUB_processed/class_attr_data_10/train.pkl"),
                 "rb",
             )
         )
@@ -274,9 +258,7 @@ def train_test_split_CUB(root_dir):
             index = parts.index("images")
             end_path = "/".join(parts[index:])
 
-            dataset[i]["img_path"] = os.path.join(
-                root_dir, "CUB/CUB_200_2011/", end_path
-            )
+            dataset[i]["img_path"] = os.path.join(root_dir, "CUB/CUB_200_2011/", end_path)
 
     return data_train, data_val, data_test
 
