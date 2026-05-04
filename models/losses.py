@@ -93,7 +93,7 @@ class CBLoss(nn.Module):
 
         if self.num_classes == 2:
             # Logits to probs
-            target_pred_probs = nn.Sigmoid()(target_pred_logits.squeeze(1))
+            target_pred_probs = F.sigmoid(target_pred_logits.squeeze(1))
             target_loss = F.binary_cross_entropy(
                 target_pred_probs, target_true.float(), reduction=self.reduction
             )
@@ -174,7 +174,7 @@ class SCBLoss(nn.Module):
 
         if self.num_classes == 2:
             # Logits to probs
-            target_pred_probs = nn.Sigmoid()(target_pred_logits.squeeze(1))
+            target_pred_probs = F.sigmoid(target_pred_logits.squeeze(1))
             target_loss = F.binary_cross_entropy(
                 target_pred_probs, target_true.float(), reduction="mean"
             )
