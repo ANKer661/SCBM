@@ -12,9 +12,7 @@ from scipy.cluster.hierarchy import linkage, dendrogram
 import wandb
 
 
-def plot_heatmap(
-    matrix, flipped_matrix, labels_names, labels_names_gt, log_name="Correlation Matrix"
-):
+def plot_heatmap(matrix, flipped_matrix, labels_names, labels_names_gt, log_name="Correlation Matrix"):
     # Create the heatmap using Plotly
     fig = go.Figure(
         data=go.Heatmap(
@@ -71,20 +69,13 @@ def plot_heatmap(
     wandb.log({log_name: wandb.Image(Image.open(buf))})
 
 
-def compute_and_plot_heatmap(
-    matrix, concepts_true, concept_names_graph, config, log_name=None
-):
+def compute_and_plot_heatmap(matrix, concepts_true, concept_names_graph, config, log_name=None):
     # Reorder CUB concepts to group colors&shapes instead of concept groups
     if config.data.dataset == "CUB":
         new_group = np.array(
-            [
-                (name.split(": ")[1] if not name.isdigit() else name)
-                for name in concept_names_graph
-            ]
+            [(name.split(": ")[1] if not name.isdigit() else name) for name in concept_names_graph]
         )
-        unique_groups, index, counts = np.unique(
-            new_group, return_counts=True, return_index=True
-        )
+        unique_groups, index, counts = np.unique(new_group, return_counts=True, return_index=True)
         # reorder groups and counts to preserve order of unique groups
         unique_groups = unique_groups[np.argsort(index)]
         counts = counts[np.argsort(index)]
@@ -97,17 +88,13 @@ def compute_and_plot_heatmap(
 
         # Get the indices that sort new_group to fit the new order
         new_rowcol = np.argwhere((unique_groups == new_group[:, None]))
-        assert (
-            new_rowcol[:, 0] == np.arange(len(new_rowcol))
-        ).all(), "Error in reordering"
+        assert (new_rowcol[:, 0] == np.arange(len(new_rowcol))).all(), "Error in reordering"
         permutation = np.argsort(new_rowcol[:, 1], kind="stable")
         perm_matrix = matrix[permutation][:, permutation]
         perm_flipped_matrix = np.flipud(perm_matrix)
         perm_flipped_matrix = np.vstack(
             [
-                np.append(
-                    concepts_true[0].cpu().numpy(),
-                )[permutation],
+                concepts_true[0].cpu().numpy()[permutation],
                 perm_flipped_matrix,
             ]
         )
@@ -140,9 +127,7 @@ def compute_and_plot_heatmap(
     perm_flipped_matrix = np.flipud(perm_matrix)
     perm_flipped_matrix = np.vstack(
         [
-            np.append(
-                concepts_true[0].cpu().numpy(),
-            )[permutation],
+            concepts_true[0].cpu().numpy()[permutation],
             perm_flipped_matrix,
         ]
     )
