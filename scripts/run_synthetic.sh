@@ -15,7 +15,7 @@ do
       model.j_epochs=150 model.c_epochs=100 model.t_epochs=50 \
       model.learning_rate=0.0002 model.weight_decay=0.0001 \
       model.train_batch_size=256 model.val_batch_size=512 \
-      workers=0 model.compile='true'
+      workers=0
   done
 
   python -u train.py +model=SCBM +data=$data model.cov_type='amortized' \

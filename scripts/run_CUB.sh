@@ -16,7 +16,7 @@ do
       model.tag=$tag model.encoder_arch=$encoder_arch \
       model.learning_rate=0.0002 model.weight_decay=0.0001 \
       model.train_batch_size=256 model.val_batch_size=512 \
-      workers=8 model.compile='true'
+      workers=8
   done;
   
   # SCBM
