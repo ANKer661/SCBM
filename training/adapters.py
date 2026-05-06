@@ -25,7 +25,7 @@ if typing.TYPE_CHECKING:
 
 @dataclass
 class BatchTensors:
-    features: torch.Tensor
+    features: torch.Tensor | None
     targets: torch.Tensor
     concepts: torch.Tensor
 
@@ -52,6 +52,12 @@ def _update_model_temperature(model: torch.nn.Module, epoch: int) -> None:
         update_temperature(epoch)
 
 
+def _require_features(batch: BatchTensors) -> torch.Tensor:
+    if batch.features is None:
+        raise ValueError("This training/evaluation path requires feature tensors.")
+    return batch.features
+
+
 class CBMAdapter:
     def __init__(self, model: CBM, loss_fn: Callable, config: DictConfig) -> None:
         self.model = model
@@ -75,18 +81,22 @@ class CBMAdapter:
         ):
             concept_probs, target_logits = self.model.forward_target_from_concepts(batch.concepts)
         elif self.config.model.training_mode == "independent" and stage.mode == "t":
-            concept_probs, target_logits, _ = self.model(batch.features, c_true=batch.concepts)
+            features = _require_features(batch)
+            concept_probs, target_logits, _ = self.model(features, c_true=batch.concepts)
         elif self.config.model.concept_learning == "autoregressive" and stage.mode == "c":
+            features = _require_features(batch)
             concept_probs, target_logits, _ = self.model(
-                batch.features, concepts_train_ar=batch.concepts
+                features, concepts_train_ar=batch.concepts
             )
         else:
-            concept_probs, target_logits, _ = self.model(batch.features)
+            features = _require_features(batch)
+            concept_probs, target_logits, _ = self.model(features)
 
         return BatchOutput(concept_probs=concept_probs, target_logits=target_logits)
 
     def forward_eval(self, batch: BatchTensors, epoch: int) -> BatchOutput:
-        concept_probs, target_logits, _ = self.model(batch.features, validation=True)
+        features = _require_features(batch)
+        concept_probs, target_logits, _ = self.model(features, validation=True)
         if self.config.model.concept_learning == "autoregressive":
             concept_probs = torch.mean(concept_probs, dim=-1)
         return BatchOutput(concept_probs=concept_probs, target_logits=target_logits)
@@ -158,8 +168,9 @@ class SCBMAdapter:
 
     def forward_train(self, batch: BatchTensors, epoch: int, stage) -> BatchOutput:
         _update_model_temperature(self.model, epoch)
+        features = _require_features(batch)
         concepts_mcmc_probs, triang_cov, target_logits = self.model(
-            batch.features, c_true=batch.concepts
+            features, c_true=batch.concepts
         )
         return BatchOutput(
             concept_probs=concepts_mcmc_probs,
@@ -168,8 +179,9 @@ class SCBMAdapter:
         )
 
     def forward_eval(self, batch: BatchTensors, epoch: int) -> BatchOutput:
+        features = _require_features(batch)
         concepts_mcmc_probs, triang_cov, target_logits = self.model(
-            batch.features, validation=True, c_true=batch.concepts
+            features, validation=True, c_true=batch.concepts
         )
         return BatchOutput(
             concept_probs=concepts_mcmc_probs,

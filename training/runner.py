@@ -42,7 +42,7 @@ class ExperimentRunner:
 
     def __init__(self, config: DictConfig) -> None:
         self.config = config
-        self.device = None
+        self.device: torch.device
         self.experiment_path = None
 
     def run(self) -> None:
@@ -53,13 +53,14 @@ class ExperimentRunner:
 
         dataloaders = build_dataloaders(self.config, gen)
         train_loader = dataloaders.train
+        target_train_loader = dataloaders.target_train
         val_loader = dataloaders.val
         test_loader = dataloaders.test
         concept_names_graph = self._get_concept_groups()
 
         model = self._setup_model(train_loader)
         loss_fn = create_loss(self.config)
-        adapter = create_adapter(model, loss_fn, self.config)
+        adapter = create_adapter(model, loss_fn, self.config)  # type: ignore
         metrics = Custom_Metrics(self.config.data.num_concepts, self.device).to(self.device)
 
         print(
@@ -72,6 +73,7 @@ class ExperimentRunner:
         t_epochs = self._run_training(
             adapter,
             train_loader,
+            target_train_loader,
             val_loader,
             metrics,
         )
@@ -210,6 +212,7 @@ class ExperimentRunner:
         self,
         adapter: SCBMAdapter | CBMAdapter,
         train_loader: DataLoader,
+        target_train_loader: DataLoader | None,
         val_loader: DataLoader,
         metrics: Metric,
     ) -> int:
@@ -219,6 +222,7 @@ class ExperimentRunner:
                 stage,
                 adapter,
                 train_loader,
+                target_train_loader,
                 val_loader,
                 metrics,
             )
@@ -229,6 +233,7 @@ class ExperimentRunner:
         stage: TrainingStage,
         adapter: SCBMAdapter | CBMAdapter,
         train_loader: DataLoader,
+        target_train_loader: DataLoader | None,
         val_loader: DataLoader,
         metrics: Metric,
     ) -> None:
@@ -237,6 +242,7 @@ class ExperimentRunner:
 
         optimizer = build_optimizer(self.config.model, adapter.model)
         lr_scheduler = build_scheduler(self.config.model, optimizer)
+        stage_train_loader = self._select_train_loader(stage, train_loader, target_train_loader)
         for epoch in range(stage.epochs):
             if epoch % stage.validate_every == 0:
                 print("\nEVALUATION ON THE VALIDATION SET:\n")
@@ -249,7 +255,7 @@ class ExperimentRunner:
                     self.device,
                 )
             train_one_epoch(
-                train_loader,
+                stage_train_loader,
                 adapter,
                 optimizer,
                 stage,
@@ -260,3 +266,20 @@ class ExperimentRunner:
             lr_scheduler.step()
 
         apply_stage_cleanup(adapter.model, stage)
+
+    def _select_train_loader(
+        self,
+        stage: TrainingStage,
+        train_loader: DataLoader,
+        target_train_loader: DataLoader | None,
+    ) -> DataLoader:
+        if (
+            self.config.model.concept_learning == "autoregressive"
+            and self.config.model.training_mode == "independent"
+            and stage.mode == "t"
+        ):
+            if target_train_loader is None:
+                raise ValueError("AR target training requires a concept-only train loader.")
+            return target_train_loader
+
+        return train_loader

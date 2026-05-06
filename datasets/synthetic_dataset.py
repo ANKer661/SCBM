@@ -179,6 +179,9 @@ class SyntheticDataset(Dataset):
 
         return {"features": features, "labels": labels, "concepts": concepts}
 
+    def get_concept_only_item(self, index) -> dict[str, torch.Tensor]:
+        return {"labels": self.y[index], "concepts": self.c[index]}
+
     def __len__(self) -> int:
         return self.X.size(0)
 

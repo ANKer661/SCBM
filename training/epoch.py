@@ -20,8 +20,9 @@ if typing.TYPE_CHECKING:
 
 
 def move_batch_to_device(batch: dict, device: torch.device) -> BatchTensors:
+    features = batch.get("features")
     return BatchTensors(
-        features=batch["features"].to(device),
+        features=None if features is None else features.to(device),
         targets=batch["labels"].to(device),
         concepts=batch["concepts"].to(device),
     )

@@ -217,6 +217,15 @@ class CUB_DatasetGenerator(Dataset):
             "concepts": image_attr,  # This is now float32 array as expected
         }
 
+    def get_concept_only_item(self, index):
+        img_data = self.data[index]
+        return {
+            "img_code": index,
+            "labels": img_data["class_label"],
+            # Keep dtype aligned with __getitem__ and cached samples.
+            "concepts": np.asarray(img_data["attribute_label"], dtype=np.float32),
+        }
+
     def __len__(self):
         return len(self.data)
 

@@ -100,6 +100,13 @@ class CIFAR10CBMDataset(datasets.CIFAR10):
             "concepts": self.concepts[index],
         }
 
+    def get_concept_only_item(self, index: int) -> dict[str, Any]:
+        return {
+            "img_code": index,
+            "labels": self.labels[index],
+            "concepts": self.concepts[index],
+        }
+
     def __len__(self) -> int:
         return self.labels.shape[0]
 

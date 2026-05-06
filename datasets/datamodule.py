@@ -64,8 +64,31 @@ def build_datasets(config_base, config_data) -> DatasetSplits:
 @dataclass(frozen=True)
 class DataLoaders:
     train: DataLoader
+    target_train: DataLoader | None
     val: DataLoader
     test: DataLoader
+
+
+class ConceptOnlyDataset(Dataset):
+    """Return labels/concepts without calling the image feature transform path."""
+
+    def __init__(self, dataset: Dataset) -> None:
+        self.dataset = dataset
+
+    def __len__(self) -> int:
+        return len(self.dataset)  # type: ignore
+
+    def __getitem__(self, index: int) -> dict:
+        if hasattr(self.dataset, "get_concept_only_item"):
+            return self.dataset.get_concept_only_item(index)  # type: ignore
+        raise TypeError(f"{type(self.dataset).__name__} does not support concept-only batches.")
+
+
+def should_build_target_train_loader(config) -> bool:
+    return (
+        config.model.concept_learning == "autoregressive"
+        and config.model.training_mode == "independent"
+    )
 
 
 def build_dataloaders(config, gen) -> DataLoaders:
@@ -81,6 +104,20 @@ def build_dataloaders(config, gen) -> DataLoaders:
         drop_last=True,
         persistent_workers=config.workers > 0,
     )
+    target_train_loader = None
+    if should_build_target_train_loader(config):
+        target_train_loader = DataLoader(
+            ConceptOnlyDataset(datasets.train),
+            batch_size=config.model.train_batch_size,
+            shuffle=True,
+            # Concept-only batches are cheap and avoid image transforms. Keeping
+            # this loader in-process also avoids an extra persistent worker pool
+            # during the target-head-only stage.
+            num_workers=0,
+            pin_memory=True,
+            generator=gen,
+            drop_last=True,
+        )
     val_loader = DataLoader(
         datasets.val,
         batch_size=config.model.val_batch_size,
@@ -97,4 +134,9 @@ def build_dataloaders(config, gen) -> DataLoaders:
         generator=gen,
     )
 
-    return DataLoaders(train=train_loader, val=val_loader, test=test_loader)
+    return DataLoaders(
+        train=train_loader,
+        target_train=target_train_loader,
+        val=val_loader,
+        test=test_loader,
+    )
