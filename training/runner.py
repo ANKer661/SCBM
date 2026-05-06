@@ -244,8 +244,11 @@ class ExperimentRunner:
         lr_scheduler = build_scheduler(self.config.model, optimizer)
         stage_train_loader = self._select_train_loader(stage, train_loader, target_train_loader)
         for epoch in range(stage.epochs):
+            epoch_start = time.perf_counter()
+            val_sec = 0.0
             if epoch % stage.validate_every == 0:
                 print("\nEVALUATION ON THE VALIDATION SET:\n")
+                val_start = time.perf_counter()
                 validate_one_epoch(
                     val_loader,
                     adapter,
@@ -254,6 +257,8 @@ class ExperimentRunner:
                     self.config,
                     self.device,
                 )
+                val_sec = time.perf_counter() - val_start
+            train_start = time.perf_counter()
             train_one_epoch(
                 stage_train_loader,
                 adapter,
@@ -263,7 +268,15 @@ class ExperimentRunner:
                 epoch,
                 self.device,
             )
+            train_sec = time.perf_counter() - train_start
             lr_scheduler.step()
+            epoch_sec = time.perf_counter() - epoch_start
+            print(
+                f"[timing] stage={stage.name} epoch={epoch + 1}/{stage.epochs} "
+                f"train_sec={train_sec:.3f} val_sec={val_sec:.3f} "
+                f"total_sec={epoch_sec:.3f}",
+                flush=True,
+            )
 
         apply_stage_cleanup(adapter.model, stage)
 
