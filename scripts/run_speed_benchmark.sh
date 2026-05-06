@@ -4,6 +4,40 @@ set -euo pipefail
 tag='SCBM_speed_benchmark'
 seed="${SEED:-42}"
 train_only="${TRAIN_ONLY:-true}"
+timing_file="${TIMING_FILE:-speed_benchmark_times.tsv}"
+
+printf 'name\tstatus\tstart_epoch\tend_epoch\telapsed_sec\telapsed_hms\n' > "$timing_file"
+
+run_timed() {
+  local name="$1"
+  shift
+
+  local start
+  local end
+  local elapsed
+  local status
+
+  start=$(date +%s)
+  set +e
+  "$@"
+  status=$?
+  set -e
+  end=$(date +%s)
+  elapsed=$((end - start))
+  printf '%s\t%d\t%d\t%d\t%d\t%02d:%02d:%02d\n' \
+    "$name" \
+    "$status" \
+    "$start" \
+    "$end" \
+    "$elapsed" \
+    $((elapsed / 3600)) \
+    $(((elapsed % 3600) / 60)) \
+    $((elapsed % 60)) >> "$timing_file"
+
+  if [ "$status" -ne 0 ]; then
+    exit "$status"
+  fi
+}
 
 run_baseline() {
   local data="$1"
@@ -15,6 +49,7 @@ run_baseline() {
   local workers="$7"
   local model="$8"
 
+  run_timed "${data}-${model}" \
   python -u train.py +model="$model" +data="$data" \
     experiment_name="speed_${data}_${model}_${seed}" seed="$seed" \
     logging.project=SCBM logging.mode=offline \
@@ -34,6 +69,7 @@ run_ar() {
   local val_batch_size="$6"
   local workers="$7"
 
+  run_timed "${data}-AR" \
   python -u train.py +model=AR +data="$data" \
     experiment_name="speed_${data}_AR_${seed}" seed="$seed" \
     logging.project=SCBM logging.mode=offline \
@@ -56,6 +92,7 @@ run_scbm() {
   local reg_precision="$9"
   local suffix="${cov_type}"
 
+  run_timed "${data}-SCBM-${suffix}" \
   python -u train.py +model=SCBM +data="$data" \
     model.cov_type="$cov_type" model.reg_precision="$reg_precision" \
     model.reg_weight=1 experiment_name="speed_${data}_SCBM_${suffix}_${seed}" \
