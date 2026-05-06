@@ -1,1 +1,1 @@
-data_path: './data/'  # Default directory for local datasets.
+data_path: '/root/autodl-tmp/data/'  # Default directory for local datasets.
