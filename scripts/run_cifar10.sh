@@ -16,7 +16,7 @@ do
       model.tag=$tag model.encoder_arch=$encoder_arch \
       model.learning_rate=0.0002 model.weight_decay=0.0001 \
       model.train_batch_size=256 model.val_batch_size=512 \
-      workers=8
+      workers=12
   done;
   
   # SCBM
@@ -27,7 +27,7 @@ do
     model.encoder_arch=$encoder_arch \
     model.learning_rate=0.0002 model.weight_decay=0.0001 \
     model.train_batch_size=256 model.val_batch_size=512 \
-    workers=8 model.compile='true'
+    workers=12 model.compile='true'
   python -u train.py +model=SCBM +data=$data \
     model.cov_type='global' model.reg_precision=None \
     experiment_name="${data}_SCBM_global_${i}" seed=$i \
@@ -35,5 +35,5 @@ do
     model.encoder_arch=$encoder_arch \
     model.learning_rate=0.0002 model.weight_decay=0.0001 \
     model.train_batch_size=256 model.val_batch_size=512 \
-    workers=8 model.compile='true'
+    workers=12 model.compile='true'
 done;
