@@ -259,7 +259,7 @@ class EmpiricalPercentileStrategy:
         with torch.no_grad():
             for _, batch in enumerate(train_loader):
                 batch_features = batch["features"].to(device)
-                concepts_pred_probs, _, _ = model(batch_features, epoch=-1, validation=True)
+                concepts_pred_probs, _, _ = model(batch_features, validation=True)
                 if is_scbm:
                     # For SCBMs, we need to average over MCMC samples
                     concepts_pred_probs = concepts_pred_probs.mean(-1)

@@ -45,6 +45,13 @@ class LossOutput:
     precision_matrix_loss: torch.Tensor | None = None
 
 
+def _update_model_temperature(model: torch.nn.Module, epoch: int) -> None:
+    raw_model = getattr(model, "_orig_mod", model)
+    update_temperature = getattr(raw_model, "update_temperature", None)
+    if update_temperature is not None and hasattr(raw_model, "curr_temp"):
+        update_temperature(epoch)
+
+
 class CBMAdapter:
     def __init__(self, model: CBM, loss_fn: Callable, config: DictConfig) -> None:
         self.model = model
@@ -60,6 +67,7 @@ class CBMAdapter:
                 self.model.encoder.eval()
 
     def forward_train(self, batch: BatchTensors, epoch: int, stage: TrainingStage) -> BatchOutput:
+        _update_model_temperature(self.model, epoch)
         if (
             self.config.model.concept_learning == "autoregressive"
             and self.config.model.training_mode == "independent"
@@ -67,18 +75,18 @@ class CBMAdapter:
         ):
             concept_probs, target_logits = self.model.forward_target_from_concepts(batch.concepts)
         elif self.config.model.training_mode == "independent" and stage.mode == "t":
-            concept_probs, target_logits, _ = self.model(batch.features, epoch, batch.concepts)
+            concept_probs, target_logits, _ = self.model(batch.features, c_true=batch.concepts)
         elif self.config.model.concept_learning == "autoregressive" and stage.mode == "c":
             concept_probs, target_logits, _ = self.model(
-                batch.features, epoch, concepts_train_ar=batch.concepts
+                batch.features, concepts_train_ar=batch.concepts
             )
         else:
-            concept_probs, target_logits, _ = self.model(batch.features, epoch)
+            concept_probs, target_logits, _ = self.model(batch.features)
 
         return BatchOutput(concept_probs=concept_probs, target_logits=target_logits)
 
     def forward_eval(self, batch: BatchTensors, epoch: int) -> BatchOutput:
-        concept_probs, target_logits, _ = self.model(batch.features, epoch, validation=True)
+        concept_probs, target_logits, _ = self.model(batch.features, validation=True)
         if self.config.model.concept_learning == "autoregressive":
             concept_probs = torch.mean(concept_probs, dim=-1)
         return BatchOutput(concept_probs=concept_probs, target_logits=target_logits)
@@ -149,8 +157,9 @@ class SCBMAdapter:
                 self.model.encoder.eval()
 
     def forward_train(self, batch: BatchTensors, epoch: int, stage) -> BatchOutput:
+        _update_model_temperature(self.model, epoch)
         concepts_mcmc_probs, triang_cov, target_logits = self.model(
-            batch.features, epoch, c_true=batch.concepts
+            batch.features, c_true=batch.concepts
         )
         return BatchOutput(
             concept_probs=concepts_mcmc_probs,
@@ -160,7 +169,7 @@ class SCBMAdapter:
 
     def forward_eval(self, batch: BatchTensors, epoch: int) -> BatchOutput:
         concepts_mcmc_probs, triang_cov, target_logits = self.model(
-            batch.features, epoch, validation=True, c_true=batch.concepts
+            batch.features, validation=True, c_true=batch.concepts
         )
         return BatchOutput(
             concept_probs=concepts_mcmc_probs,

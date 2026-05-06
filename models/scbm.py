@@ -34,7 +34,7 @@ class SCBM(nn.Module):
         cov_type (str): The type of covariance matrix ("empirical", "global", or "amortized", where "empirical is fixed at start").
 
     Methods:
-        forward(x, epoch, validation=False, c_true=None):
+        forward(x, validation=False, c_true=None):
             Perform a forward pass through the model.
         intervene(c_mcmc_probs, c_mcmc_logits):
             Perform an intervention on the model's concept predictions.
@@ -53,7 +53,6 @@ class SCBM(nn.Module):
         self.concept_learning = config_model.concept_learning
         self.num_monte_carlo = config_model.num_monte_carlo
         self.straight_through = config_model.straight_through
-        self.curr_temp = 1.0
         if self.training_mode == "joint":
             self.num_epochs = config_model.j_epochs
         else:
@@ -70,6 +69,7 @@ class SCBM(nn.Module):
         self.register_buffer("cov_cols", cols, persistent=False)
         self.register_buffer("cov_diag_mask", rows == cols, persistent=False)
         self.register_buffer("cov_diag_range", torch.arange(self.num_concepts), persistent=False)
+        self.register_buffer("curr_temp", torch.tensor(1.0), persistent=False)
 
         self.init_temp = 1.0
         self.final_temp = 0.5
@@ -115,7 +115,6 @@ class SCBM(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        epoch: int,
         validation: bool = False,
         return_full: bool = False,
         c_true: torch.Tensor | None = None,
@@ -127,7 +126,6 @@ class SCBM(nn.Module):
 
         Args:
             x (torch.Tensor): The input covariates. Shape: (batch_size, input_dims)
-            epoch (int): The current epoch number.
             validation (bool, optional): Flag indicating whether this is a validation pass. Default is False.
             return_full (bool, optional): Flag indicating whether to also return mu of concept. Default is False.
             c_true (torch.Tensor, optional): The ground-truth concept values. Required for "independent" training mode. Default is None.
@@ -199,8 +197,7 @@ class SCBM(nn.Module):
             c_mcmc = c_true.unsqueeze(-1).repeat(1, 1, self.num_monte_carlo).float()
         else:
             # Backpropagation necessary
-            curr_temp = self.compute_temperature(epoch)
-            dist = RelaxedBernoulli(temperature=curr_temp, probs=c_mcmc_prob)
+            dist = RelaxedBernoulli(temperature=self.curr_temp, probs=c_mcmc_prob)
 
             # Bernoulli relaxation
             mcmc_relaxed = dist.rsample()
@@ -262,10 +259,9 @@ class SCBM(nn.Module):
             )  # [B, pred_dim]
             return torch.log(y_pred_probs + 1e-6)
 
-    def compute_temperature(self, epoch: int) -> float:
+    def update_temperature(self, epoch: int) -> None:
         curr_temp = max(self.init_temp * math.exp(self.temp_decay_rate * epoch), self.final_temp)
-        self.curr_temp = curr_temp
-        return curr_temp
+        self.curr_temp.fill_(curr_temp)
 
     def freeze_c(self) -> None:
         self.head.apply(freeze_module)

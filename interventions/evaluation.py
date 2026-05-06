@@ -119,7 +119,7 @@ def _collect_scbm_intervention_dataset(
             batch_features, target_true = batch["features"].to(device), batch["labels"].to(device)
             concepts_true = batch["concepts"].to(device)
             concepts_mcmc_probs, mu, triang_cov, target_pred_logits = model(
-                batch_features, epoch, validation=True, return_full=True
+                batch_features, validation=True, return_full=True
             )
 
             target_loss, concepts_loss, prec_loss, total_loss = loss_fn(
@@ -363,7 +363,7 @@ def _collect_cbm_intervention_dataset(
                 concepts_pred_probs,
                 target_pred_logits,
                 concepts_hard,
-            ) = model(batch_features, epoch, validation=True)
+            ) = model(batch_features, validation=True)
             if config.model.concept_learning == "autoregressive":
                 concepts_pred_probs_m = torch.mean(concepts_pred_probs, dim=-1)
             else:

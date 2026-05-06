@@ -121,11 +121,16 @@ class CBM(nn.Module):
         if self.concept_learning in ("hard", "autoregressive"):
             self.num_monte_carlo = config_model.num_monte_carlo
             self.straight_through = config_model.straight_through
-            self.curr_temp = 1.0
             if self.training_mode == "joint":
                 self.num_epochs = config_model.j_epochs
             else:
                 self.num_epochs = config_model.t_epochs
+            self.init_temp = 1.0
+            self.final_temp = 0.5
+            self.temp_decay_rate = (math.log(self.final_temp) - math.log(self.init_temp)) / float(
+                self.num_epochs
+            )
+            self.register_buffer("curr_temp", torch.tensor(1.0), persistent=False)
         elif self.concept_learning == "embedding":
             self.CEM_embedding = config_model.embedding_size
 
@@ -177,7 +182,6 @@ class CBM(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        epoch: int,
         c_true: torch.Tensor | None = None,
         validation: bool = False,
         concepts_train_ar: torch.Tensor | None = None,
@@ -190,7 +194,6 @@ class CBM(nn.Module):
 
         Args:
             x (torch.Tensor): The input covariates. Shape: (batch_size, input_dims)
-            epoch (int): The current epoch number.
             c_true (torch.Tensor, optional): The ground-truth concept values. Required for "independent" training mode. Default is None.
             validation (bool, optional): Flag indicating whether this is a validation pass. Default is False.
             concepts_train_ar (torch.Tensor, optional): Ground-truth concept values for autoregressive training. Default is None.
@@ -207,7 +210,7 @@ class CBM(nn.Module):
         c_logit = None
 
         if self.concept_learning == "hard":
-            c_prob, c = self._forward_hard(intermediate, epoch, validation)
+            c_prob, c = self._forward_hard(intermediate, validation)
         elif self.concept_learning == "soft":
             c_prob, c, c_logit = self._forward_soft(intermediate)
         elif self.concept_learning == "autoregressive":
@@ -220,7 +223,7 @@ class CBM(nn.Module):
         y_pred_logits = self._predict_target(c, c_logit, validation)
         return c_prob, y_pred_logits, c
 
-    def _forward_hard(self, intermediate: torch.Tensor, epoch: int, validation: bool):
+    def _forward_hard(self, intermediate: torch.Tensor, validation: bool):
         c_logit = self.concept_predictor(intermediate)
         c_prob = self.act_c(c_logit)
 
@@ -231,8 +234,7 @@ class CBM(nn.Module):
 
         # Relax bernoulli sampling with Gumbel Softmax to allow for backpropagation
         elif self.training_mode == "joint":
-            curr_temp = self.compute_temperature(epoch)
-            dist = RelaxedBernoulli(temperature=curr_temp, probs=c_prob)
+            dist = RelaxedBernoulli(temperature=self.curr_temp, probs=c_prob)
             c_relaxed = dist.rsample([self.num_monte_carlo]).movedim(0, -1)
             if self.straight_through:
                 # Straight-Through Gumbel Softmax
@@ -547,13 +549,9 @@ class CBM(nn.Module):
             c_hard[:, j, :] = concept_hard
         return c_prob, c_hard
 
-    def compute_temperature(self, epoch: int) -> float:
-        final_temp = 0.5
-        init_temp = 1.0
-        rate = (math.log(final_temp) - math.log(init_temp)) / float(self.num_epochs)
-        curr_temp = max(init_temp * math.exp(rate * epoch), final_temp)
-        self.curr_temp = curr_temp
-        return curr_temp
+    def update_temperature(self, epoch: int) -> None:
+        curr_temp = max(self.init_temp * math.exp(self.temp_decay_rate * epoch), self.final_temp)
+        self.curr_temp.fill_(curr_temp)
 
     def freeze_c(self) -> None:
         self.head.apply(freeze_module)
