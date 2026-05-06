@@ -150,6 +150,7 @@ def _collect_scbm_intervention_dataset(
                 concepts_pred_probs,
                 cov_norm=c_cov_norm,
                 prec_loss=prec_loss,
+                validation=True,
             )
 
             _, _, c_mcmc_probs, _ = intervention_strategy.compute_intervention(
@@ -251,6 +252,7 @@ def _run_scbm_intervention_step(
                 concepts_interv_probs,
                 cov_norm=c_norm,
                 prec_loss=prec_loss,
+                validation=True,
             )
 
             updated_intervention_dataset.append(
@@ -382,6 +384,7 @@ def _collect_cbm_intervention_dataset(
                 target_pred_logits,
                 concepts_true,
                 concepts_pred_probs_m,
+                validation=True,
             )
             intervention_dataset_base.append(
                 [
@@ -474,6 +477,7 @@ def _run_cbm_intervention_step(
                 target_pred_logits,
                 concepts_true,
                 concepts_interv_probs,
+                validation=True,
             )
             concepts_dataset_mask_new.append(concepts_mask_new)
 
