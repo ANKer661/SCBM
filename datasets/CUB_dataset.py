@@ -19,7 +19,7 @@ import pickle
 
 import numpy as np
 import torch
-import torchvision.transforms as transforms
+from torchvision.transforms import v2
 from PIL import Image
 from torch.utils.data import Dataset
 
@@ -170,16 +170,12 @@ class CUB_DatasetGenerator(Dataset):
         self.label_cache[index] = image_label
 
     def _get_cached_image(self, index):
-        """Retrieve a cached image with its original dimensions"""
+        """Retrieve a cached image tensor with its original dimensions."""
         h, w = self.dims_cache[index]  # torch.int32 scalars
         h, w = int(h), int(w)
 
         # Extract the image without padding
         img_tensor = self.image_cache[index][:, :h, :w]  # torch.uint8, shape (3, H, W)
-
-        # Convert back to PIL Image (HWC format)
-        img_array = img_tensor.permute(1, 2, 0).numpy()  # np.ndarray, uint8, shape (H, W, 3)
-        image_pil = Image.fromarray(img_array)
 
         # Unpack attributes
         packed_attrs = self.attr_cache[index].numpy()  # np.ndarray, uint8, packed bits
@@ -187,7 +183,7 @@ class CUB_DatasetGenerator(Dataset):
 
         image_label = int(self.label_cache[index])  # Python int
 
-        return image_pil, image_attr, image_label
+        return img_tensor, image_attr, image_label
 
     def __getitem__(self, index):
         # Check if already cached
@@ -205,9 +201,10 @@ class CUB_DatasetGenerator(Dataset):
 
             if self.cache:
                 self._cache_image(index, image_data, image_attr, image_label)
+            image_data = torch.from_numpy(image_data).permute(2, 0, 1)
 
         if self.transform is not None:
-            image_data = self.transform(image_data)  # torch.float32, shape (3, 224, 224)
+            image_data = self.transform(image_data)  # torch.uint8, shape (3, 299, 299)
 
         # Return a tuple of images, labels, and protected attributes
         return {
@@ -281,19 +278,9 @@ def build_CUB_datasets(config):
 
     # Following the transformations from CBM paper
     resol = 299
-    train_transform = transforms.Compose(
-        [
-            transforms.RandomResizedCrop(resol),
-            transforms.PILToTensor(),
-        ]
-    )
+    train_transform = v2.RandomResizedCrop(resol)
 
-    test_transform = transforms.Compose(
-        [
-            transforms.CenterCrop(resol),
-            transforms.PILToTensor(),
-        ]
-    )
+    test_transform = v2.CenterCrop(resol)
 
     # Datasets
     image_datasets = {
