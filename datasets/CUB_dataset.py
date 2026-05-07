@@ -283,21 +283,15 @@ def build_CUB_datasets(config):
     resol = 299
     train_transform = transforms.Compose(
         [
-            transforms.ColorJitter(brightness=32 / 255, saturation=(0.5, 1.5)),
             transforms.RandomResizedCrop(resol),
-            transforms.Resize(size=(224, 224)),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),  # implicitly divides by 255
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.PILToTensor(),
         ]
     )
 
     test_transform = transforms.Compose(
         [
             transforms.CenterCrop(resol),
-            transforms.Resize(size=(224, 224)),
-            transforms.ToTensor(),  # implicitly divides by 255
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.PILToTensor(),
         ]
     )
 
