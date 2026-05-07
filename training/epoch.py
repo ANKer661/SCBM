@@ -13,6 +13,7 @@ from training.adapters import BatchTensors
 if typing.TYPE_CHECKING:
     from omegaconf import DictConfig
     from torch.utils.data import DataLoader
+    from torch.nn import Module
     from torchmetrics import Metric
 
     from training.adapters import CBMAdapter, SCBMAdapter
@@ -22,10 +23,21 @@ if typing.TYPE_CHECKING:
 def move_batch_to_device(batch: dict, device: torch.device) -> BatchTensors:
     features = batch.get("features")
     return BatchTensors(
-        features=None if features is None else features.to(device),
-        targets=batch["labels"].to(device),
-        concepts=batch["concepts"].to(device),
+        features=None if features is None else features.to(device, non_blocking=True),
+        targets=batch["labels"].to(device, non_blocking=True),
+        concepts=batch["concepts"].to(device, non_blocking=True),
     )
+
+
+def apply_batch_transform(
+    batch: BatchTensors,
+    batch_transform: Module | None,
+    train: bool,
+) -> BatchTensors:
+    if batch_transform is None or batch.features is None:
+        return batch
+    batch.features = batch_transform(batch.features, train=train)
+    return batch
 
 
 def train_one_epoch(
@@ -36,6 +48,7 @@ def train_one_epoch(
     metrics: Metric,
     epoch: int,
     device: torch.device,
+    batch_transform: Module | None = None,
 ) -> None:
     adapter.prepare_train(stage)
     metrics.reset()
@@ -45,6 +58,7 @@ def train_one_epoch(
         tqdm(loader, desc=f"Epoch {epoch + 1}", position=0, leave=True)
     ):
         batch = move_batch_to_device(batch, device)
+        batch = apply_batch_transform(batch, batch_transform, train=True)
         output = adapter.forward_train(batch, epoch, stage)
         losses = adapter.compute_loss(output, batch)
 
@@ -75,6 +89,7 @@ def validate_one_epoch(
     device: torch.device,
     test: bool = False,
     concept_names_graph: list[str] | None = None,
+    batch_transform: Module | None = None,
 ) -> None:
     adapter.model.eval()
     metrics.reset()
@@ -85,6 +100,7 @@ def validate_one_epoch(
             tqdm(loader, desc=f"Epoch {epoch}", position=0, leave=True)
         ):
             batch = move_batch_to_device(batch, device)
+            batch = apply_batch_transform(batch, batch_transform, train=False)
             output = adapter.forward_eval(batch, epoch)
 
             if test:

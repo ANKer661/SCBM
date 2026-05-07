@@ -23,6 +23,7 @@ def define_strategy(
     model: nn.Module,
     device: torch.device,
     config: DictConfig,
+    batch_transform=None,
 ):
     """
     Return the intervention strategy that determines how the ground-truth intervened-on concept values are encoded in the model.
@@ -56,7 +57,10 @@ def define_strategy(
             strategy = PercentileStrategy()
         elif inter_strategy == "emp_perc":
             strategy = EmpiricalPercentileStrategy(
-                train_loader=train_loader, model=model, device=device
+                train_loader=train_loader,
+                model=model,
+                device=device,
+                batch_transform=batch_transform,
             )
         else:
             raise NotImplementedError(
@@ -65,7 +69,9 @@ def define_strategy(
         print("USING FOLLOWING STRATEGY:", strategy.__class__.__name__)
 
     elif config.model.model == "scbm":
-        strategy = SCBMConditionalStrategy(inter_strategy, train_loader, model, device, config)
+        strategy = SCBMConditionalStrategy(
+            inter_strategy, train_loader, model, device, config, batch_transform=batch_transform
+        )
         print("USING FOLLOWING STRATEGY:", strategy.interv_strat.__class__.__name__)
     else:
         raise NotImplementedError(
@@ -93,7 +99,7 @@ class SCBMConditionalStrategy:
         config (dict): Configuration dictionary containing model and data settings.
     """
 
-    def __init__(self, inter_strategy, train_loader, model, device, config):
+    def __init__(self, inter_strategy, train_loader, model, device, config, batch_transform=None):
         self.num_monte_carlo = config.model.num_monte_carlo
         self.num_concepts = config.data.num_concepts
         self.act_c = nn.Sigmoid()
@@ -101,7 +107,11 @@ class SCBMConditionalStrategy:
             self.interv_strat = PercentileStrategy()
         elif inter_strategy == "emp_perc":
             self.interv_strat = EmpiricalPercentileStrategy(
-                train_loader=train_loader, model=model, device=device, is_scbm=True
+                train_loader=train_loader,
+                model=model,
+                device=device,
+                is_scbm=True,
+                batch_transform=batch_transform,
             )
         elif inter_strategy == "conf_interval_optimal":
             self.interv_strat = ConfIntervalOptimalStrategy(level=config.model.level)
@@ -253,12 +263,19 @@ class PercentileStrategy:
 class EmpiricalPercentileStrategy:
     # Set intervened concepts to 5th and 95th percentile of training distribution
     def __init__(
-        self, train_loader: DataLoader, model: nn.Module, device: torch.device, is_scbm: bool = False
+        self,
+        train_loader: DataLoader,
+        model: nn.Module,
+        device: torch.device,
+        is_scbm: bool = False,
+        batch_transform=None,
     ) -> None:
         concept_pred = []
         with torch.no_grad():
             for _, batch in enumerate(train_loader):
-                batch_features = batch["features"].to(device)
+                batch_features = batch["features"].to(device, non_blocking=True)
+                if batch_transform is not None:
+                    batch_features = batch_transform(batch_features, train=False)
                 concepts_pred_probs, _, _ = model(batch_features, validation=True)
                 if is_scbm:
                     # For SCBMs, we need to average over MCMC samples

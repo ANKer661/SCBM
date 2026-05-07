@@ -86,11 +86,14 @@ def _build_intervention_components(
     model: nn.Module,
     device: torch.device,
     config: DictConfig,
+    batch_transform=None,
 ) -> tuple:
     """Instantiate the policy and strategy for one configured intervention run."""
     try:
         intervention_policy = define_policy(policy)
-        intervention_strategy = define_strategy(strategy, train_loader, model, device, config)
+        intervention_strategy = define_strategy(
+            strategy, train_loader, model, device, config, batch_transform=batch_transform
+        )
     except NotImplementedError:
         print(
             f"Intervention strategy {strategy} with policy {policy} not implemented for model {config.model.model}."
@@ -98,6 +101,15 @@ def _build_intervention_components(
         return None, None
 
     return intervention_policy, intervention_strategy
+
+
+def _move_intervention_batch(batch: dict, device: torch.device, batch_transform=None):
+    batch_features = batch["features"].to(device, non_blocking=True)
+    if batch_transform is not None:
+        batch_features = batch_transform(batch_features, train=False)
+    target_true = batch["labels"].to(device, non_blocking=True)
+    concepts_true = batch["concepts"].to(device, non_blocking=True)
+    return batch_features, target_true, concepts_true
 
 
 def _collect_scbm_intervention_dataset(
@@ -109,6 +121,7 @@ def _collect_scbm_intervention_dataset(
     loss_fn: Callable,
     device: torch.device,
     intervention_strategy,
+    batch_transform=None,
 ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
     """Run the SCBM test pass and store tensors needed for later intervention steps."""
     intervention_dataset_base = []
@@ -116,8 +129,9 @@ def _collect_scbm_intervention_dataset(
 
     with torch.no_grad():
         for k, batch in enumerate(test_loader):
-            batch_features, target_true = batch["features"].to(device), batch["labels"].to(device)
-            concepts_true = batch["concepts"].to(device)
+            batch_features, target_true, concepts_true = _move_intervention_batch(
+                batch, device, batch_transform
+            )
             concepts_mcmc_probs, mu, triang_cov, target_pred_logits = model(
                 batch_features, validation=True, return_full=True
             )
@@ -350,14 +364,16 @@ def _collect_cbm_intervention_dataset(
     config: DictConfig,
     loss_fn: Callable,
     device: torch.device,
+    batch_transform=None,
 ) -> list[torch.Tensor]:
     """Run the CBM test pass and store tensors needed for later intervention steps."""
     intervention_dataset_base = []
 
     with torch.no_grad():
         for k, batch in tqdm(enumerate(test_loader), leave=True, position=0):
-            batch_features, target_true = batch["features"].to(device), batch["labels"].to(device)
-            concepts_true = batch["concepts"].to(device)
+            batch_features, target_true, concepts_true = _move_intervention_batch(
+                batch, device, batch_transform
+            )
 
             (
                 concepts_pred_probs,
@@ -573,6 +589,7 @@ def intervene_scbm(
     config: DictConfig,
     loss_fn: Callable,
     device: torch.device,
+    batch_transform=None,
 ) -> None:
     """
     Compute the efficacy of intervening on a model using different intervention strategies and policies for SCBMs.
@@ -607,7 +624,7 @@ def intervene_scbm(
         # Intervening with different policies
         for policy in policies:
             intervention_policy, intervention_strategy = _build_intervention_components(
-                strategy, policy, train_loader, model, device, config
+                strategy, policy, train_loader, model, device, config, batch_transform=batch_transform
             )
             if intervention_policy is None:
                 continue
@@ -622,6 +639,7 @@ def intervene_scbm(
                 loss_fn,
                 device,
                 intervention_strategy,
+                batch_transform=batch_transform,
             )
 
             ## Computing intervention curves using stored concept predictions
@@ -673,6 +691,7 @@ def intervene_cbm(
     config: DictConfig,
     loss_fn: Callable,
     device: torch.device,
+    batch_transform=None,
 ) -> None:
     """
     Compute the efficacy of intervening on a model using different intervention strategies and policies for baselines.
@@ -712,14 +731,21 @@ def intervene_cbm(
         # Intervening with different policies
         for policy in policies:
             intervention_policy, intervention_strategy = _build_intervention_components(
-                strategy, policy, train_loader, model, device, config
+                strategy, policy, train_loader, model, device, config, batch_transform=batch_transform
             )
             if intervention_policy is None:
                 continue
 
             # One full model pass without interventions
             intervention_dataset_base = _collect_cbm_intervention_dataset(
-                test_loader, model, metrics, epoch, config, loss_fn, device
+                test_loader,
+                model,
+                metrics,
+                epoch,
+                config,
+                loss_fn,
+                device,
+                batch_transform=batch_transform,
             )
 
             _log_intervention_metrics(

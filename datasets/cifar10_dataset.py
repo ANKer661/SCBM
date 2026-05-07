@@ -13,7 +13,7 @@ Functions:
 
 from __future__ import annotations
 import torch
-from torchvision import datasets, transforms
+from torchvision import datasets
 from typing import Any
 
 
@@ -41,7 +41,13 @@ def build_CIFAR10_CBM_datasets(
 
 
 class CIFAR10CBMDataset(datasets.CIFAR10):
-    def __init__(self, root: str, train: bool, download: bool = False, cache: bool = True) -> None:
+    def __init__(
+        self,
+        root: str,
+        train: bool,
+        download: bool = False,
+        cache: bool = True,
+    ) -> None:
         super(CIFAR10CBMDataset, self).__init__(
             root=root,
             train=train,
@@ -51,24 +57,8 @@ class CIFAR10CBMDataset(datasets.CIFAR10):
 
         self.cache = cache
         if train:
-            self.transform = transforms.Compose(
-                [
-                    transforms.ConvertImageDtype(torch.float32),  # uint8 [0, 255] -> float32 [0, 1]
-                    transforms.ColorJitter(brightness=32 / 255, saturation=(0.5, 1.5)),
-                    transforms.Resize(size=(224, 224)),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-                ]
-            )
             concepts_path = root + "cifar10_train_concept_labels.pt"
         else:
-            self.transform = transforms.Compose(
-                [
-                    transforms.ConvertImageDtype(torch.float32),  # uint8 [0, 255] -> float32 [0, 1]
-                    transforms.Resize(size=(224, 224)),
-                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-                ]
-            )
             concepts_path = root + "cifar10_test_concept_labels.pt"
 
         # bool tensor, cast to float in model/loss
@@ -90,8 +80,6 @@ class CIFAR10CBMDataset(datasets.CIFAR10):
     def __getitem__(self, index: int) -> dict[str, Any]:  # type: ignore[override]
         X = self.images[index]
         target = self.labels[index].item()
-        if self.transform is not None:
-            X = self.transform(X)
 
         return {
             "img_code": index,

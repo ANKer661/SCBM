@@ -19,6 +19,7 @@ from models.losses import create_loss
 from models.factory import create_model
 from datasets.datamodule import build_dataloaders
 from training.adapters import create_adapter
+from training.batch_transforms import create_batch_transform
 from training.epoch import train_one_epoch, validate_one_epoch
 from training.logging import finish_wandb, setup_wandb
 from training.metrics import Custom_Metrics
@@ -59,6 +60,9 @@ class ExperimentRunner:
         concept_names_graph = self._get_concept_groups()
 
         model = self._setup_model(train_loader)
+        batch_transform = create_batch_transform(self.config)
+        if batch_transform is not None:
+            batch_transform.to(self.device)
         loss_fn = create_loss(self.config)
         adapter = create_adapter(model, loss_fn, self.config)  # type: ignore
         metrics = Custom_Metrics(self.config.data.num_concepts, self.device).to(self.device)
@@ -76,6 +80,7 @@ class ExperimentRunner:
             target_train_loader,
             val_loader,
             metrics,
+            batch_transform,
         )
 
         model.apply(freeze_module)
@@ -95,6 +100,7 @@ class ExperimentRunner:
             self.device,
             test=True,
             concept_names_graph=concept_names_graph,
+            batch_transform=batch_transform,
         )
 
         if self.config.train_only:
@@ -112,6 +118,7 @@ class ExperimentRunner:
             self.config,
             loss_fn,
             self.device,
+            batch_transform=batch_transform,
         )
 
         finish_wandb()
@@ -215,6 +222,7 @@ class ExperimentRunner:
         target_train_loader: DataLoader | None,
         val_loader: DataLoader,
         metrics: Metric,
+        batch_transform: torch.nn.Module | None,
     ) -> int:
         stages = build_stage_plan(self.config)
         for stage in stages:
@@ -225,6 +233,7 @@ class ExperimentRunner:
                 target_train_loader,
                 val_loader,
                 metrics,
+                batch_transform,
             )
         return stages[-1].epochs
 
@@ -236,6 +245,7 @@ class ExperimentRunner:
         target_train_loader: DataLoader | None,
         val_loader: DataLoader,
         metrics: Metric,
+        batch_transform: torch.nn.Module | None,
     ) -> None:
         print(stage.message)
         apply_freeze_policy(adapter.model, stage.freeze_policy)
@@ -256,6 +266,7 @@ class ExperimentRunner:
                     epoch,
                     self.config,
                     self.device,
+                    batch_transform=batch_transform,
                 )
                 val_sec = time.perf_counter() - val_start
             train_start = time.perf_counter()
@@ -267,6 +278,7 @@ class ExperimentRunner:
                 metrics,
                 epoch,
                 self.device,
+                batch_transform=batch_transform,
             )
             train_sec = time.perf_counter() - train_start
             lr_scheduler.step()
