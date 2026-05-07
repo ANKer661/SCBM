@@ -19,17 +19,17 @@ class CIFARBatchTransform(nn.Module):
         super().__init__()
         self.train_transform = v2.Compose(
             [
+                v2.ToDtype(torch.float32, scale=True),
                 v2.ColorJitter(brightness=32 / 255, saturation=(0.5, 1.5)),
                 v2.Resize(size=(224, 224), antialias=True),
                 v2.RandomHorizontalFlip(),
-                v2.ToDtype(torch.float32, scale=True),
                 v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ]
         )
         self.eval_transform = v2.Compose(
             [
-                v2.Resize(size=(224, 224), antialias=True),
                 v2.ToDtype(torch.float32, scale=True),
+                v2.Resize(size=(224, 224), antialias=True),
                 v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ]
         )
