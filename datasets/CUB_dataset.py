@@ -201,7 +201,7 @@ class CUB_DatasetGenerator(Dataset):
 
             if self.cache:
                 self._cache_image(index, image_data, image_attr, image_label)
-            image_data = torch.from_numpy(image_data).permute(2, 0, 1)
+            image_data = torch.from_numpy(np.array(image_data)).permute(2, 0, 1)
 
         if self.transform is not None:
             image_data = self.transform(image_data)  # torch.uint8, shape (3, 299, 299)
