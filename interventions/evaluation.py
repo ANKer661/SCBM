@@ -465,18 +465,19 @@ def _run_cbm_intervention_step(
             ) = [item.to(device) for item in batch]
 
             if config.model.concept_learning == "autoregressive":
+                num_monte_carlo = concepts_hard.size(-1)
                 concepts_mask_new = intervention_policy.compute_intervention_mask(
                     concepts_mask,
                     concepts_pred_probs=concepts_pred_probs_m,
                 )
                 concept_probs, concepts_interv_probs = model.intervene_ar_from_intermediate(
-                    concepts_true.unsqueeze(-1).expand(-1, -1, concepts_hard.shape[-1]),
-                    concepts_mask_new.unsqueeze(-1).expand(-1, -1, concepts_hard.shape[-1]),
+                    concepts_true.unsqueeze(-1).expand(-1, -1, num_monte_carlo),
+                    concepts_mask_new.unsqueeze(-1).expand(-1, -1, num_monte_carlo),
                     intermediate,
                 )
                 target_pred_logits = model.intervene(
                     concepts_interv_probs,
-                    concepts_mask_new.unsqueeze(-1).expand(-1, -1, concepts_hard.shape[-1]),
+                    concepts_mask_new.unsqueeze(-1).expand(-1, -1, num_monte_carlo),
                     intermediate,
                     concepts_pred_probs,
                 )
