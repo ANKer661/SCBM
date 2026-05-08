@@ -20,8 +20,8 @@ def _roc_auc_score_with_missing(labels, scores):
             )
             weights[c] = len(labels[labels == c])
         else:
-            aurocs[c] = np.NaN
-            weights[c] = np.NaN
+            aurocs[c] = np.nan
+            weights[c] = np.nan
 
     # Computing weighted average
     mask = ~np.isnan(aurocs)
