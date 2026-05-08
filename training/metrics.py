@@ -10,7 +10,7 @@ from torchmetrics import Metric
 from utils.metrics import calc_concept_metrics, calc_target_metrics
 
 
-class Custom_Metrics(Metric):
+class ConceptBottleneckMetrics(Metric):
     """
     Track and compute losses, target metrics, and concept metrics per epoch.
     """

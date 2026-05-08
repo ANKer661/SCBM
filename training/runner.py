@@ -22,7 +22,7 @@ from training.adapters import create_adapter
 from training.batch_transforms import create_batch_transform
 from training.epoch import train_one_epoch, validate_one_epoch
 from training.logging import finish_wandb, setup_wandb
-from training.metrics import Custom_Metrics
+from training.metrics import ConceptBottleneckMetrics
 from training.optim import build_optimizer, build_scheduler
 from training.stages import apply_freeze_policy, apply_stage_cleanup, build_stage_plan
 from utils.freezing import freeze_module
@@ -65,7 +65,9 @@ class ExperimentRunner:
             batch_transform.to(self.device)
         loss_fn = create_loss(self.config)
         adapter = create_adapter(model, loss_fn, self.config)  # type: ignore
-        metrics = Custom_Metrics(self.config.data.num_concepts, self.device).to(self.device)
+        metrics = ConceptBottleneckMetrics(self.config.data.num_concepts, self.device).to(
+            self.device
+        )
 
         print(
             "TRAINING "
