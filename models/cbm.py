@@ -457,17 +457,23 @@ class CBM(nn.Module):
         return self._predict_intervention_target(concepts_interv_probs, weight)
 
     def _predict_intervention_target(self, c: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-        y_pred_probs_i = 0
-        for i in range(self.num_monte_carlo):
-            c_i = c[:, :, i]
-            y_pred_logits_i = self.head(c_i)
-            if self.pred_dim == 1:
-                y_pred_probs_i += weight[:, i].unsqueeze(1) * torch.sigmoid(y_pred_logits_i)
-            else:
-                y_pred_probs_i += weight[:, i].unsqueeze(1) * torch.softmax(y_pred_logits_i, dim=1)
-        y_pred_probs = y_pred_probs_i / torch.sum(weight, dim=1).unsqueeze(1)
+        # weight: (B, num_monte_carlo)
+        batch_size, num_concepts, num_monte_carlo = c.shape
+        c_flat = c.permute(0, 2, 1).reshape(batch_size * num_monte_carlo, num_concepts)
+        y_pred_logits_flat = self.head(c_flat)
+        weight_sum = torch.sum(weight, dim=1, keepdim=True)
+
         if self.pred_dim == 1:
+            y_pred_probs = torch.sigmoid(y_pred_logits_flat).view(
+                batch_size, num_monte_carlo, 1
+            )
+            y_pred_probs = torch.sum(y_pred_probs * weight.unsqueeze(-1), dim=1) / weight_sum
             return torch.logit(y_pred_probs, eps=1e-6)
+
+        y_pred_probs = torch.softmax(y_pred_logits_flat, dim=1).view(
+            batch_size, num_monte_carlo, self.pred_dim
+        )
+        y_pred_probs = torch.sum(y_pred_probs * weight.unsqueeze(-1), dim=1) / weight_sum
         return torch.log(y_pred_probs + 1e-6)
 
     def _intervene_cem(
