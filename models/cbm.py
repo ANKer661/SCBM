@@ -208,6 +208,20 @@ class CBM(nn.Module):
         """
 
         intermediate = self.encoder(x)
+        return self.forward_from_intermediate(
+            intermediate,
+            c_true=c_true,
+            validation=validation,
+            concepts_train_ar=concepts_train_ar,
+        )
+
+    def forward_from_intermediate(
+        self,
+        intermediate: torch.Tensor,
+        c_true: torch.Tensor | None = None,
+        validation: bool = False,
+        concepts_train_ar: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         c_logit = None
 
         if self.concept_learning == "hard":
@@ -400,7 +414,7 @@ class CBM(nn.Module):
         self,
         concepts_interv_probs: torch.Tensor,
         concepts_mask: torch.Tensor,
-        input_features: torch.Tensor,
+        intermediate: torch.Tensor,
         concepts_pred_probs: torch.Tensor,
     ) -> torch.Tensor:
         # concepts_mask, 1 means intervened.
@@ -414,7 +428,7 @@ class CBM(nn.Module):
             return self._intervene_ar(concepts_interv_probs, concepts_mask, concepts_pred_probs)
 
         if self.concept_learning == "embedding":
-            return self._intervene_cem(concepts_interv_probs, input_features)
+            return self._intervene_cem(concepts_interv_probs, intermediate)
 
         raise NotImplementedError(
             "Unsupported concept learning method {self.concept_learning} for interventions"
@@ -445,7 +459,7 @@ class CBM(nn.Module):
     ) -> torch.Tensor:
         # Here, concepts_interv_probs are already the hard
         weight_k = torch.where(
-            concepts_interv_probs.bool(), # True: intervened to 1, False: intervened to 0
+            concepts_interv_probs.bool(),  # True: intervened to 1, False: intervened to 0
             torch.log(concepts_pred_probs + 1e-6),  # weight = log(p)
             torch.log(1 - concepts_pred_probs + 1e-6),  # weight = log(1-p)
         )  # (B, num_concepts, num_monte_carlo)
@@ -464,9 +478,7 @@ class CBM(nn.Module):
         weight_sum = torch.sum(weight, dim=1, keepdim=True)
 
         if self.pred_dim == 1:
-            y_pred_probs = torch.sigmoid(y_pred_logits_flat).view(
-                batch_size, num_monte_carlo, 1
-            )
+            y_pred_probs = torch.sigmoid(y_pred_logits_flat).view(batch_size, num_monte_carlo, 1)
             y_pred_probs = torch.sum(y_pred_probs * weight.unsqueeze(-1), dim=1) / weight_sum
             return torch.logit(y_pred_probs, eps=1e-6)
 
@@ -477,9 +489,8 @@ class CBM(nn.Module):
         return torch.log(y_pred_probs + 1e-6)
 
     def _intervene_cem(
-        self, concepts_interv_probs: torch.Tensor, input_features: torch.Tensor
+        self, concepts_interv_probs: torch.Tensor, intermediate: torch.Tensor
     ) -> torch.Tensor:
-        intermediate = self.encoder(input_features)
         batch_size = intermediate.size(0)
         c_p = self.positive_embeddings(intermediate).view(
             batch_size, self.num_concepts, self.CEM_embedding
@@ -493,6 +504,7 @@ class CBM(nn.Module):
         z_prob = z_prob.reshape(batch_size, self.concept_dim)
         return self.head(z_prob)
 
+    # Legacy api for AR intervention
     def intervene_ar(
         self, concepts_true: torch.Tensor, concepts_mask: torch.Tensor, input_features: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -515,13 +527,17 @@ class CBM(nn.Module):
                 - c (torch.Tensor): Hard predicted concept values with interventions applied. Shape: (batch_size, num_concepts, num_monte_carlo)
         """
         # Concept predictions for autoregressive model. Intervened-on concepts are fixed to ground truth
-        intermediate = self.encoder(input_features)  # this can be cached
+        intermediate = self.encoder(input_features)
+        return self.intervene_ar_from_intermediate(concepts_true, concepts_mask, intermediate)
+
+    def intervene_ar_from_intermediate(
+        self, concepts_true: torch.Tensor, concepts_mask: torch.Tensor, intermediate: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Perform an AR intervention using a cached encoder output."""
         batch_size = intermediate.size(0)
         c_prob = intermediate.new_empty(batch_size, self.num_concepts, self.num_monte_carlo)
         c_hard = intermediate.new_empty(batch_size, self.num_concepts, self.num_monte_carlo)
-        expanded_intermediate = intermediate.unsqueeze(1).expand(
-            -1, self.num_monte_carlo, -1
-        )
+        expanded_intermediate = intermediate.unsqueeze(1).expand(-1, self.num_monte_carlo, -1)
 
         assert isinstance(self.concept_predictor, PackedARConceptPredictor)
         for j in range(self.num_concepts):

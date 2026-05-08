@@ -377,7 +377,7 @@ def _run_scbm_batch_first_interventions(
 
 def _collect_cbm_intervention_dataset(
     test_loader: DataLoader,
-    model: nn.Module,
+    model: CBM,
     metrics: ConceptBottleneckMetrics,
     epoch: int,
     config: DictConfig,
@@ -393,12 +393,13 @@ def _collect_cbm_intervention_dataset(
             batch_features, target_true, concepts_true = _move_intervention_batch(
                 batch, device, batch_transform
             )
+            intermediate = model.encoder(batch_features)
 
             (
                 concepts_pred_probs,
                 target_pred_logits,
                 concepts_hard,
-            ) = model(batch_features, validation=True)
+            ) = model.forward_from_intermediate(intermediate, validation=True)
             if config.model.concept_learning == "autoregressive":
                 concepts_pred_probs_m = torch.mean(concepts_pred_probs, dim=-1)
             else:
@@ -426,7 +427,7 @@ def _collect_cbm_intervention_dataset(
                     concepts_pred_probs.cpu(),
                     concepts_true.cpu(),
                     target_true.cpu(),
-                    batch_features.cpu(),
+                    intermediate.cpu(),
                     concepts_hard.cpu(),
                     concepts_pred_probs_m.cpu(),
                 ]
@@ -452,12 +453,12 @@ def _run_cbm_intervention_step(
     concepts_dataset_mask_new = []
 
     with torch.no_grad():
-        for k, batch in tqdm(enumerate(intervention_loader), leave=True, position=0):
+        for _, batch in tqdm(enumerate(intervention_loader), leave=True, position=0):
             (
                 concepts_pred_probs,
                 concepts_true,
                 target_true,
-                input_features,
+                intermediate,
                 concepts_hard,
                 concepts_pred_probs_m,
                 concepts_mask,
@@ -468,15 +469,15 @@ def _run_cbm_intervention_step(
                     concepts_mask,
                     concepts_pred_probs=concepts_pred_probs_m,
                 )
-                concept_probs, concepts_interv_probs = model.intervene_ar(
+                concept_probs, concepts_interv_probs = model.intervene_ar_from_intermediate(
                     concepts_true.unsqueeze(-1).expand(-1, -1, concepts_hard.shape[-1]),
                     concepts_mask_new.unsqueeze(-1).expand(-1, -1, concepts_hard.shape[-1]),
-                    input_features,
-                )  # type: ignore
+                    intermediate,
+                )
                 target_pred_logits = model.intervene(
                     concepts_interv_probs,
                     concepts_mask_new.unsqueeze(-1).expand(-1, -1, concepts_hard.shape[-1]),
-                    input_features,
+                    intermediate,
                     concepts_pred_probs,
                 )
                 concepts_interv_probs = torch.mean(concept_probs, dim=-1)
@@ -493,7 +494,7 @@ def _run_cbm_intervention_step(
                 target_pred_logits = model.intervene(
                     concepts_interv_probs,
                     concepts_mask_new,
-                    input_features,
+                    intermediate,
                     concepts_pred_probs,
                 )
 
@@ -540,7 +541,7 @@ def _run_cbm_batch_first_interventions(
                 concepts_pred_probs,
                 concepts_true,
                 target_true,
-                input_features,
+                intermediate,
                 concepts_hard,
                 concepts_pred_probs_m,
                 concepts_mask,
@@ -552,15 +553,15 @@ def _run_cbm_batch_first_interventions(
                         concepts_mask,
                         concepts_pred_probs=concepts_pred_probs_m,
                     )
-                    concept_probs, concepts_interv_probs = model.intervene_ar(
+                    concept_probs, concepts_interv_probs = model.intervene_ar_from_intermediate(
                         concepts_true.unsqueeze(-1).expand(-1, -1, concepts_hard.shape[-1]),
                         concepts_mask.unsqueeze(-1).expand(-1, -1, concepts_hard.shape[-1]),
-                        input_features,
+                        intermediate,
                     )
                     target_pred_logits = model.intervene(
                         concepts_interv_probs,
                         concepts_mask.unsqueeze(-1).expand(-1, -1, concepts_hard.shape[-1]),
-                        input_features,
+                        intermediate,
                         concepts_pred_probs,
                     )
                     concepts_interv_probs = torch.mean(concept_probs, dim=-1)
@@ -577,7 +578,7 @@ def _run_cbm_batch_first_interventions(
                     target_pred_logits = model.intervene(
                         concepts_interv_probs,
                         concepts_mask,
-                        input_features,
+                        intermediate,
                         concepts_pred_probs,
                     )
 
