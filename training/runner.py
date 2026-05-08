@@ -208,12 +208,12 @@ class ExperimentRunner:
         return [str(i) for i in range(config_data.num_concepts)]
 
     def _select_intervention_function(self) -> Callable:
-        from interventions.evaluation import intervene_cbm, intervene_scbm
+        from interventions.evaluation import intervene_cbm_batch_first, intervene_scbm_batch_first
 
         if self.config.model.model == "cbm":
-            return intervene_cbm
+            return intervene_cbm_batch_first
         elif self.config.model.model == "scbm":
-            return intervene_scbm
+            return intervene_scbm_batch_first
 
         raise ValueError(f"Intervention not implemented for model {self.config.model.model}")
 
