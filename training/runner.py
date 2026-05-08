@@ -69,6 +69,26 @@ class ExperimentRunner:
             self.device
         )
 
+        if self.config.get("intervene_only", False):
+            print("\nPERFORMING INTERVENTIONS:\n")
+            intervention_start = time.perf_counter()
+            intervene = self._select_intervention_function()
+            intervene(
+                train_loader,
+                test_loader,
+                model,
+                metrics,
+                0,
+                self.config,
+                loss_fn,
+                self.device,
+                batch_transform=batch_transform,
+            )
+            intervention_sec = time.perf_counter() - intervention_start
+            print(f"[timing] intervention_sec={intervention_sec:.3f}", flush=True)
+            finish_wandb()
+            return None
+
         print(
             "TRAINING "
             + str(self.config.model.model)
@@ -208,7 +228,21 @@ class ExperimentRunner:
         return [str(i) for i in range(config_data.num_concepts)]
 
     def _select_intervention_function(self) -> Callable:
-        from interventions.evaluation import intervene_cbm_batch_first, intervene_scbm_batch_first
+        from interventions.evaluation import (
+            intervene_cbm,
+            intervene_cbm_batch_first,
+            intervene_scbm,
+            intervene_scbm_batch_first,
+        )
+
+        intervention_order = self.config.get("intervention_order", "batch_first")
+        if intervention_order == "step_first":
+            if self.config.model.model == "cbm":
+                return intervene_cbm
+            elif self.config.model.model == "scbm":
+                return intervene_scbm
+        elif intervention_order != "batch_first":
+            raise ValueError(f"Unknown intervention order {intervention_order}")
 
         if self.config.model.model == "cbm":
             return intervene_cbm_batch_first
