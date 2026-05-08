@@ -228,21 +228,7 @@ class ExperimentRunner:
         return [str(i) for i in range(config_data.num_concepts)]
 
     def _select_intervention_function(self) -> Callable:
-        from interventions.evaluation import (
-            intervene_cbm,
-            intervene_cbm_batch_first,
-            intervene_scbm,
-            intervene_scbm_batch_first,
-        )
-
-        intervention_order = self.config.get("intervention_order", "batch_first")
-        if intervention_order == "step_first":
-            if self.config.model.model == "cbm":
-                return intervene_cbm
-            elif self.config.model.model == "scbm":
-                return intervene_scbm
-        elif intervention_order != "batch_first":
-            raise ValueError(f"Unknown intervention order {intervention_order}")
+        from interventions.evaluation import intervene_cbm_batch_first, intervene_scbm_batch_first
 
         if self.config.model.model == "cbm":
             return intervene_cbm_batch_first
