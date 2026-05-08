@@ -61,9 +61,8 @@ class CIFAR10CBMDataset(datasets.CIFAR10):
         else:
             concepts_path = root + "cifar10_test_concept_labels.pt"
 
-        # bool tensor, cast to float in model/loss
         concepts = torch.load(concepts_path, map_location="cpu", weights_only=True)
-        self.concepts = concepts
+        self.concepts = concepts.float()
 
         # self.images: N, C, H, W
         self.images = torch.as_tensor(self.data, dtype=torch.uint8).permute(0, 3, 1, 2)
