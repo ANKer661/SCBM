@@ -130,6 +130,7 @@ class CBM(nn.Module):
             self.temp_decay_rate = (math.log(self.final_temp) - math.log(self.init_temp)) / float(
                 self.num_epochs
             )
+            self.curr_temp: torch.Tensor
             self.register_buffer("curr_temp", torch.tensor(1.0), persistent=False)
         elif self.concept_learning == "embedding":
             self.CEM_embedding = config_model.embedding_size
@@ -443,14 +444,11 @@ class CBM(nn.Module):
         concepts_pred_probs: torch.Tensor,
     ) -> torch.Tensor:
         # Here, concepts_interv_probs are already the hard
-        # MCMC sampled concepts as determined by the intervene_ar function
-        idx = torch.nonzero(concepts_interv_probs * concepts_mask == 1, as_tuple=False)
-        weight_k = torch.log(1 - concepts_pred_probs + 1e-6)  # If intervened-on concepts have value 0
-        weight_k.index_put_(
-            list(idx.t()),
-            torch.log(concepts_pred_probs + 1e-6)[idx[:, 0], idx[:, 1], idx[:, 2]],
-            accumulate=False,
-        )  # If intervened-on concepts have value 1
+        weight_k = torch.where(
+            concepts_interv_probs.bool(), # True: intervened to 1, False: intervened to 0
+            torch.log(concepts_pred_probs + 1e-6),  # weight = log(p)
+            torch.log(1 - concepts_pred_probs + 1e-6),  # weight = log(1-p)
+        )  # (B, num_concepts, num_monte_carlo)
         weight_k = weight_k * concepts_mask  # Only compute weight for intervened-on concepts
         weight = torch.sum(weight_k, dim=(1))  # Sum over concepts
         weight = torch.softmax(
@@ -511,7 +509,7 @@ class CBM(nn.Module):
                 - c (torch.Tensor): Hard predicted concept values with interventions applied. Shape: (batch_size, num_concepts, num_monte_carlo)
         """
         # Concept predictions for autoregressive model. Intervened-on concepts are fixed to ground truth
-        intermediate = self.encoder(input_features)
+        intermediate = self.encoder(input_features)  # this can be cached
         batch_size = intermediate.size(0)
         c_prob = intermediate.new_empty(batch_size, self.num_concepts, self.num_monte_carlo)
         c_hard = intermediate.new_empty(batch_size, self.num_concepts, self.num_monte_carlo)
