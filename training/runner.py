@@ -10,6 +10,7 @@ import os
 import time
 import typing
 import uuid
+from itertools import islice
 from os.path import join
 from pathlib import Path
 
@@ -71,6 +72,7 @@ class ExperimentRunner:
 
         if self.config.get("intervene_only", False):
             print("\nPERFORMING INTERVENTIONS:\n")
+            test_loader = self._limit_intervention_loader(test_loader)
             intervention_start = time.perf_counter()
             intervene = self._select_intervention_function()
             intervene(
@@ -236,6 +238,21 @@ class ExperimentRunner:
             return intervene_scbm_batch_first
 
         raise ValueError(f"Intervention not implemented for model {self.config.model.model}")
+
+    def _limit_intervention_loader(self, test_loader: DataLoader) -> DataLoader:
+        max_batches = self.config.get("intervention_max_batches")
+        if max_batches is None:
+            return test_loader
+
+        class LimitedLoader:
+            def __iter__(self):
+                return islice(iter(test_loader), int(max_batches))
+
+            def __len__(self):
+                return min(len(test_loader), int(max_batches))
+
+        print(f"Limiting intervention test loader to {int(max_batches)} batches.")
+        return LimitedLoader()
 
     def _run_training(
         self,
