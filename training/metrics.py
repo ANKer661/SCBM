@@ -78,10 +78,10 @@ class Custom_Metrics(Metric):
             self.y_correct += (y_true_for_acc == y_pred).sum()
 
         if validation:
-            self.y_true.append(y_true)
-            self.y_pred_logits.append(y_pred_logits.detach())
-            self.c_true.append(c_true)
-            self.c_pred_probs.append(c_pred_probs.detach())
+            self.y_true.append(y_true.detach().cpu())
+            self.y_pred_logits.append(y_pred_logits.detach().cpu())
+            self.c_true.append(c_true.detach().cpu())
+            self.c_pred_probs.append(c_pred_probs.detach().cpu())
         if cov_norm is not None:
             self.cov_norm += cov_norm.detach() * n_samples
         if prec_loss is not None:
