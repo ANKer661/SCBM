@@ -115,6 +115,8 @@ class SCBMConditionalStrategy:
             )
         elif inter_strategy == "conf_interval_optimal":
             self.interv_strat = ConfIntervalOptimalStrategy(level=config.model.level)
+        elif inter_strategy == "conf_interval_optimal_fw":
+            self.interv_strat = ConfIntervalOptimalFWStrategy(level=config.model.level)
         else:
             raise NotImplementedError(
                 "No such strategy as",
@@ -458,6 +460,161 @@ class ConfIntervalOptimalStrategy:
         c_intervened_logits = interv_vector_unordered.gather(1, indices_reversed)
 
         return c_intervened_logits
+
+
+class ConfIntervalOptimalFWStrategy:
+    """
+    Batched Frank-Wolfe solver for SCBM confidence-interval interventions.
+
+    This solves the same constrained problem as ConfIntervalOptimalStrategy,
+    but avoids the sample-wise SciPy SLSQP loop. The original problem is
+    written over intervened logits eta':
+
+        minimize BCEWithLogits(eta', c_true)
+        subject to (eta' - mu)^T Sigma^{-1} (eta' - mu) <= chi2
+                   eta'_i >= mu_i if c_i = 1
+                   eta'_i <= mu_i if c_i = 0
+
+    We reparameterize eta' = mu + direction * u, where direction is +1 for
+    positive concepts and -1 for negative concepts. Then the direction
+    constraints become u >= 0, and the confidence region becomes an ellipsoid
+    u^T A u <= chi2 with A = D Sigma^{-1} D, where D = diag(direction).
+
+    Frank-Wolfe keeps every iterate inside this feasible ellipsoid by
+    moving along convex combinations of feasible points.
+
+    The linear minimization oracle below uses the closed-form ellipsoid
+    direction -A^{-1} grad, then clamps to the positive orthant. The clamp is an
+    approximation to the exact active-set solution for u >= 0.
+
+    Args:
+        level (float): The confidence level for the confidence interval. Default: 0.99.
+        steps (int): The number of Frank-Wolfe iterations to perform. Default: 100.
+        line_search_points (int): The number of points to evaluate in the line
+            search between the current iterate and the oracle point.
+            If set to 1, uses a standard diminishing step size instead. Default: 21.
+        direction_eps (float): A small positive value to ensure the intervention
+            direction is valid after clamping. Default: 1e-4.
+    """
+
+    def __init__(
+        self,
+        level: float = 0.99,
+        steps: int = 100,
+        line_search_points: int = 21,
+        direction_eps: float = 1e-4,
+    ) -> None:
+        self.level = level
+        self.steps = steps
+        self.line_search_points = line_search_points
+        self.direction_eps = direction_eps
+
+    def compute_intervened_logits(
+        self,
+        c_mu: torch.Tensor,
+        c_cov: torch.Tensor,
+        c_true: torch.Tensor,
+        c_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        num_intervened = int(c_mask.sum(1)[0].item())
+        num_concepts = c_cov.size(1)
+
+        # Move currently intervened concepts to the front so every sample has a
+        # compact [B, num_intervened] optimization problem. The final result is
+        # scattered back to the original concept order at the end.
+        indices = torch.argsort(c_mask, dim=1, descending=True, stable=True)
+        row_indices = indices.unsqueeze(2).expand(-1, -1, num_concepts)
+        col_indices = indices.unsqueeze(1).expand(-1, num_concepts, -1)
+        perm_cov = c_cov.gather(1, row_indices)
+        perm_cov = perm_cov.gather(2, col_indices)
+        marginal_cov = perm_cov[:, :num_intervened, :num_intervened]
+        marginal_cov = numerical_stability_check(marginal_cov.float(), device=marginal_cov.device)
+        target = (c_true * c_mask).gather(1, indices)[:, :num_intervened].float()
+        marginal_mu = c_mu.gather(1, indices)[:, :num_intervened].float()
+
+        # direction_i is +1 for c_i=1 and -1 for c_i=0
+        # so the constraint u_i >= 0 express the "increasing constraint"
+        direction = ((2 * c_true - 1) * c_mask).gather(1, indices)[:, :num_intervened].float()
+
+        # The likelihood-ratio confidence region for a Gaussian is a
+        # Mahalanobis ellipsoid with radius squared given by the chi-square
+        # quantile for the number of intervened concepts.
+        cutoff = float(chi2.ppf(q=self.level, df=num_intervened))
+        cutoff_tensor = torch.tensor(cutoff, device=c_mu.device, dtype=marginal_mu.dtype)
+
+        # In u-coordinates:
+        #   eta' - mu = direction * u
+        #   (eta' - mu)^T Sigma^{-1} (eta' - mu) = u^T A u
+        # where A = D Sigma^{-1} D and D = diag(direction).
+        cov_inverse = torch.linalg.inv(marginal_cov)
+        A = (
+            cov_inverse * direction.unsqueeze(1) * direction.unsqueeze(2)
+        )  # (B, num_intervened, num_intervened)
+
+        # start from the confidence-boundary point with equal positive
+        # displacement in every intervened concept.
+        ones = torch.ones_like(marginal_mu)  # (B, num_intervened)
+        direction_quad = (ones.unsqueeze(1) @ A @ ones.unsqueeze(2)).squeeze(-1).squeeze(-1)  # (B,)
+        init_scale = torch.sqrt(cutoff_tensor / (direction_quad + 1e-12))
+        u = ones * init_scale.unsqueeze(1)  # (B, num_intervened)
+
+        eye = torch.eye(num_intervened, device=c_mu.device, dtype=marginal_mu.dtype).expand_as(A)
+        line_grid = torch.linspace(
+            0,
+            1,
+            self.line_search_points,
+            device=c_mu.device,
+            dtype=marginal_mu.dtype,
+        )
+
+        for step_idx in range(self.steps):
+            # gradient of BCEWithLogits(mu + direction * u, target) w.r.t. u
+            eta = marginal_mu + direction * u
+            grad_u = direction * (torch.sigmoid(eta) - target)
+
+            # Frank-Wolfe linear minimization oracle on the ellipsoid.
+            # without u >= 0 constraint, the minimizer is proportional to -A^{-1} grad.
+            v = torch.linalg.solve(
+                A + 1e-6 * eye,
+                -grad_u.unsqueeze(-1),
+            )
+            # clamp negative coordinates to a small positive
+            # value to keep the intervention direction valid
+            v = torch.clamp(v.squeeze(-1), min=self.direction_eps)  # (B, num_intervened)
+
+            # rescale to the boundary of confidence region
+            v_quad = (v.unsqueeze(1) @ A @ v.unsqueeze(2)).squeeze(-1).squeeze(-1)  # (B,)
+            v = v * torch.sqrt(cutoff_tensor / (v_quad + 1e-12)).unsqueeze(1)
+
+            if self.line_search_points > 1:
+                # Batched grid line search between the current feasible point
+                # and the oracle point. Convex combinations stay feasible
+                # because the ellipsoid plus orthant is a convex set.
+                candidates = (1 - line_grid.view(1, -1, 1)) * u.unsqueeze(1) + line_grid.view(
+                    1, -1, 1
+                ) * v.unsqueeze(1)  # (B, line_search_points, num_intervened)
+                candidate_eta = marginal_mu.unsqueeze(1) + direction.unsqueeze(1) * candidates
+                candidate_loss = F.binary_cross_entropy_with_logits(
+                    candidate_eta,
+                    target.unsqueeze(1).expand_as(candidate_eta),
+                    reduction="none",
+                ).sum(dim=2)  # (B, line_search_points)
+                best = candidate_loss.argmin(dim=1)
+                u = candidates[torch.arange(u.shape[0], device=u.device), best]  # (B, num_intervened)
+            else:
+                # standard diminishing Frank-Wolfe step size fallback.
+                step_size = 2.0 / (step_idx + 2.0)
+                u = (1 - step_size) * u + step_size * v
+
+        # convert back from u-coordinates to intervened logits eta' and
+        # restore the original concept order
+        intervened_eta = marginal_mu + direction * u
+        indices_reversed = torch.argsort(indices)
+        sorted_intervened_logits = torch.full_like(
+            c_mu, float("nan"), device=c_mu.device, dtype=torch.float32
+        )
+        sorted_intervened_logits[:, :num_intervened] = intervened_eta
+        return sorted_intervened_logits.gather(1, indices_reversed)
 
 
 class HardCBMStrategy:

@@ -8,6 +8,7 @@ train_only: False # Whether to train the model only and exit before performing i
 intervene_only: False # Whether to skip training/test evaluation and only run interventions [True, False]
 intervention_max_batches: null # Optional test-loader batch limit for intervention-only benchmarks.
 intervention_log_interval: 10 # Log full intervention metrics every N intervened concepts.
+intervention_order: batch_first # Intervention loop order [batch_first, step_first].
 
 logging:
   project: 'SCBM' # Name of the wandb project
