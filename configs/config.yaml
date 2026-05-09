@@ -7,6 +7,7 @@ save_model: False # Whether to save the model. Set to True for inspecting models
 train_only: False # Whether to train the model only and exit before performing interventions [True, False]
 intervene_only: False # Whether to skip training/test evaluation and only run interventions [True, False]
 intervention_max_batches: null # Optional test-loader batch limit for intervention-only benchmarks.
+intervention_log_interval: 10 # Log full intervention metrics every N intervened concepts.
 
 logging:
   project: 'SCBM' # Name of the wandb project

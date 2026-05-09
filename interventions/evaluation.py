@@ -80,9 +80,23 @@ def _log_intervention_metrics(
 
 
 def _make_step_metrics(
-    n_concepts: int, num_interventions: int, device: torch.device
-) -> list[ConceptBottleneckMetrics]:
-    return [ConceptBottleneckMetrics(n_concepts, device).to(device) for _ in range(num_interventions)]
+    n_concepts: int, steps_to_log: list[int], device: torch.device
+) -> dict[int, ConceptBottleneckMetrics]:
+    return {
+        step: ConceptBottleneckMetrics(n_concepts, device).to(device)
+        for step in steps_to_log
+    }
+
+
+def _intervention_steps_to_log(num_interventions: int, config: DictConfig) -> list[int]:
+    interval = int(config.get("intervention_log_interval", 1))
+    if interval <= 0:
+        raise ValueError("intervention_log_interval must be positive.")
+
+    steps = [step for step in range(1, num_interventions + 1) if step % interval == 0]
+    if num_interventions not in steps:
+        steps.append(num_interventions)
+    return steps
 
 
 def _build_intervention_components(
@@ -306,7 +320,7 @@ def _run_scbm_batch_first_interventions(
     intervention_policy: InterventionPolicy,
     intervention_strategy,
     model: SCBM,
-    step_metrics: list[ConceptBottleneckMetrics],
+    step_metrics: dict[int, ConceptBottleneckMetrics],
     config: DictConfig,
     loss_fn: Callable,
     device: torch.device,
@@ -327,7 +341,8 @@ def _run_scbm_batch_first_interventions(
                 target_true,
             ) = [item.to(device) for item in batch]
 
-            for num_intervened, step_metric in enumerate(step_metrics, start=1):
+            for num_intervened in range(1, max(step_metrics) + 1):
+                step_metric = step_metrics.get(num_intervened)
                 concepts_mask = intervention_policy.compute_intervention_mask(
                     concepts_mask,
                     concepts_pred_probs=concepts_pred_probs,
@@ -361,18 +376,19 @@ def _run_scbm_batch_first_interventions(
 
                 concepts_pred_probs = c_mcmc_probs.mean(-1)
                 c_norm = torch.norm(c_cov) / (c_cov.numel() ** 0.5)
-                step_metric.update(
-                    target_loss,
-                    concepts_loss,
-                    total_loss,
-                    target_true,
-                    target_pred_logits,
-                    concepts_true,
-                    concepts_pred_probs,
-                    cov_norm=c_norm,
-                    prec_loss=prec_loss,
-                    validation=True,
-                )
+                if step_metric is not None:
+                    step_metric.update(
+                        target_loss,
+                        concepts_loss,
+                        total_loss,
+                        target_true,
+                        target_pred_logits,
+                        concepts_true,
+                        concepts_pred_probs,
+                        cov_norm=c_norm,
+                        prec_loss=prec_loss,
+                        validation=True,
+                    )
 
 
 def _collect_cbm_intervention_dataset(
@@ -526,7 +542,7 @@ def _run_cbm_batch_first_interventions(
     intervention_policy: InterventionPolicy,
     intervention_strategy,
     model: CBM,
-    step_metrics: list[ConceptBottleneckMetrics],
+    step_metrics: dict[int, ConceptBottleneckMetrics],
     config: DictConfig,
     loss_fn: Callable,
     device: torch.device,
@@ -548,7 +564,8 @@ def _run_cbm_batch_first_interventions(
                 concepts_mask,
             ) = [item.to(device) for item in batch]
 
-            for num_intervened, step_metric in enumerate(step_metrics, start=1):
+            for num_intervened in range(1, max(step_metrics) + 1):
+                step_metric = step_metrics.get(num_intervened)
                 if config.model.concept_learning == "autoregressive":
                     concepts_mask = intervention_policy.compute_intervention_mask(
                         concepts_mask,
@@ -590,16 +607,17 @@ def _run_cbm_batch_first_interventions(
                     target_true,
                 )
 
-                step_metric.update(
-                    target_loss,
-                    concepts_loss,
-                    total_loss,
-                    target_true,
-                    target_pred_logits,
-                    concepts_true,
-                    concepts_interv_probs,
-                    validation=True,
-                )
+                if step_metric is not None:
+                    step_metric.update(
+                        target_loss,
+                        concepts_loss,
+                        total_loss,
+                        target_true,
+                        target_pred_logits,
+                        concepts_true,
+                        concepts_interv_probs,
+                        validation=True,
+                    )
 
 
 def intervene_scbm(
@@ -757,7 +775,8 @@ def intervene_scbm_batch_first(
                 define_metrics=should_define_wandb_metrics,
             )
 
-            step_metrics = _make_step_metrics(metrics.n_concepts, num_interventions, device)
+            steps_to_log = _intervention_steps_to_log(num_interventions, config)
+            step_metrics = _make_step_metrics(metrics.n_concepts, steps_to_log, device)
             _run_scbm_batch_first_interventions(
                 intervention_dataset,
                 intervention_policy,
@@ -768,7 +787,8 @@ def intervene_scbm_batch_first(
                 loss_fn,
                 device,
             )
-            for num_intervened, step_metric in enumerate(step_metrics, start=1):
+            for num_intervened in steps_to_log:
+                step_metric = step_metrics[num_intervened]
                 _log_intervention_metrics(
                     step_metric,
                     config,
@@ -930,7 +950,8 @@ def intervene_cbm_batch_first(
                 define_metrics=should_define_wandb_metrics,
             )
 
-            step_metrics = _make_step_metrics(metrics.n_concepts, num_interventions, device)
+            steps_to_log = _intervention_steps_to_log(num_interventions, config)
+            step_metrics = _make_step_metrics(metrics.n_concepts, steps_to_log, device)
             _run_cbm_batch_first_interventions(
                 intervention_dataset_base,
                 intervention_policy,
@@ -941,7 +962,8 @@ def intervene_cbm_batch_first(
                 loss_fn,
                 device,
             )
-            for num_intervened, step_metric in enumerate(step_metrics, start=1):
+            for num_intervened in steps_to_log:
+                step_metric = step_metrics[num_intervened]
                 _log_intervention_metrics(
                     step_metric,
                     config,
