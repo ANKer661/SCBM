@@ -354,7 +354,7 @@ class ConfIntervalOptimalStrategy:
         # Approach: Find theta s.t.  Λn(θ)= −2(ℓ(θ)−ℓ(θ^))=χ^2_{1-α,n} and minimize concept loss of intervened concepts.
         # Note, theta^ is = mu, evaluated for the N(mu,Sigma) distribution, while theta is point on the boundary of the confidence region
         # Then, we make theta by arg min Concept BCE(θ) s.t. Λn(θ) <= holds with 1-α = self.level for theta~N(0,Sigma) (not fully correct explanation, but intuition).
-        n_intervened = c_mask.sum(1)[0]
+        n_intervened = int(c_mask.sum(1)[0].item())
         # Separate intervened-on concepts from others
         indices = torch.argsort(c_mask, dim=1, descending=True, stable=True)
         perm_cov = c_cov.gather(1, indices.unsqueeze(2).expand(-1, -1, c_cov.size(2)))
@@ -368,7 +368,7 @@ class ConfIntervalOptimalStrategy:
         interv_direction = (
             ((2 * c_true - 1) * c_mask).gather(1, indices)[:, :n_intervened].float().cpu()
         )  # direction
-        quantile_cutoff = chi2.ppf(q=self.level, df=n_intervened.cpu())
+        quantile_cutoff = chi2.ppf(q=self.level, df=n_intervened)
 
         # Finding good init point on confidence region boundary (each dim with equal magnitude)
         dist = MultivariateNormal(torch.zeros(n_intervened), marginal_interv_cov)
@@ -445,7 +445,7 @@ class ConfIntervalOptimalStrategy:
                 },
                 bounds={"lb": lb_interv[i], "ub": ub_interv[i]},
                 max_iter=50,
-                tol=1e-4 * n_intervened.cpu(),
+                tol=1e-4 * n_intervened,
             )
             interv_vector[i] = minimum.x
 
