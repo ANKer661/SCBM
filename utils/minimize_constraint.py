@@ -12,6 +12,10 @@ _constr_keys = {"fun", "lb", "ub", "jac", "hess", "hessp", "keep_feasible"}
 _bounds_keys = {"lb", "ub", "keep_feasible"}
 
 
+def _to_numpy_float64(value):
+    return np.asarray(value, dtype=np.float64)
+
+
 def _build_obj(f, x0):
     numel = x0.numel()
 
@@ -23,7 +27,10 @@ def _build_obj(f, x0):
         with torch.enable_grad():
             fval = f(x)
         (grad,) = torch.autograd.grad(fval, x)
-        return fval.detach().cpu().numpy(), grad.view(-1).cpu().numpy()
+        return (
+            _to_numpy_float64(fval.detach().cpu().numpy()),
+            _to_numpy_float64(grad.view(-1).cpu().numpy()),
+        )
 
     def f_hess(x):
         x = to_tensor(x).requires_grad_(True)
@@ -34,7 +41,7 @@ def _build_obj(f, x0):
         def matvec(p):
             p = to_tensor(p)
             (hvp,) = torch.autograd.grad(grad, x, p, retain_graph=True)
-            return hvp.view(-1).cpu().numpy()
+            return _to_numpy_float64(hvp.view(-1).cpu().numpy())
 
         return LinearOperator((numel, numel), matvec=matvec)
 
@@ -58,7 +65,7 @@ def _build_constr(constr, x0):
 
     def f(x):
         x = to_tensor(x)
-        return f_(x).cpu().numpy()
+        return _to_numpy_float64(f_(x).cpu().numpy())
 
     def f_jac(x):
         x = to_tensor(x)
@@ -68,19 +75,19 @@ def _build_constr(constr, x0):
             x.requires_grad_(True)
             with torch.enable_grad():
                 (grad,) = torch.autograd.grad(f_(x), x)
-        return grad.view(-1).cpu().numpy()
+        return _to_numpy_float64(grad.view(-1).cpu().numpy())
 
     def f_hess(x, v):
         x = to_tensor(x)
         if "hess" in constr:
             hess = constr["hess"](x)
-            return v[0] * hess.view(numel, numel).cpu().numpy()
+            return _to_numpy_float64(v[0] * hess.view(numel, numel).cpu().numpy())
         elif "hessp" in constr:
 
             def matvec(p):
                 p = to_tensor(p)
                 hvp = constr["hessp"](x, p)
-                return v[0] * hvp.view(-1).cpu().numpy()
+                return _to_numpy_float64(v[0] * hvp.view(-1).cpu().numpy())
 
             return LinearOperator((numel, numel), matvec=matvec)
         else:
@@ -98,7 +105,7 @@ def _build_constr(constr, x0):
                     hvp = torch.zeros_like(grad)
                 else:
                     (hvp,) = torch.autograd.grad(grad, x, p, retain_graph=True)
-                return v[0] * hvp.view(-1).cpu().numpy()
+                return _to_numpy_float64(v[0] * hvp.view(-1).cpu().numpy())
 
             return LinearOperator((numel, numel), matvec=matvec)
 
@@ -114,13 +121,13 @@ def _build_constr(constr, x0):
 
 def _check_bound(val, x0):
     if isinstance(val, numbers.Number):
-        return np.full(x0.numel(), val)
+        return np.full(x0.numel(), val, dtype=np.float64)
     elif isinstance(val, torch.Tensor):
         assert val.numel() == x0.numel()
-        return val.detach().cpu().numpy().flatten()
+        return _to_numpy_float64(val.detach().cpu().numpy().flatten())
     elif isinstance(val, np.ndarray):
         assert val.size == x0.numel()
-        return val.flatten()
+        return _to_numpy_float64(val.flatten())
     else:
         raise ValueError("Bound value has unrecognized format.")
 
@@ -242,7 +249,7 @@ def minimize_constr(
             x = to_tensor(x)
             fval = f(x)
             grad = jacobian(x)
-            return fval.cpu().numpy(), grad.cpu().numpy()
+            return _to_numpy_float64(fval.cpu().numpy()), _to_numpy_float64(grad.cpu().numpy())
 
         if type(hessian) == str:
             f_hess = hessian
@@ -254,7 +261,7 @@ def minimize_constr(
                 def matvec(p):
                     p = to_tensor(p)
                     hvp = hessian(x) @ p
-                    return hvp.cpu().numpy()
+                    return _to_numpy_float64(hvp.cpu().numpy())
 
                 return LinearOperator((x0.numel(), x0.numel()), matvec=matvec)
 
@@ -266,7 +273,7 @@ def minimize_constr(
             x = to_tensor(x)
             fval = f(x)
             grad = jacobian(x)
-            return fval.cpu().numpy(), grad.cpu().numpy()
+            return _to_numpy_float64(fval.cpu().numpy()), _to_numpy_float64(grad.cpu().numpy())
 
     else:
         f_with_jac, f_hess = _build_obj(f, x0)
@@ -278,7 +285,7 @@ def minimize_constr(
         constraints = []
 
     # optimize
-    x0_np = x0.float().cpu().numpy().flatten().copy()
+    x0_np = x0.detach().cpu().numpy().astype(np.float64, copy=True).flatten()
     method = kwargs.pop("method")
     if method == "trust-constr":
         result = minimize_scipy(
@@ -308,8 +315,8 @@ def minimize_constr(
             )
         original_fun = constr["fun"]
         original_jac = constr["jac"]
-        constr["fun"] = lambda x: original_fun(torch.tensor(x).float()).cpu().numpy()
-        constr["jac"] = lambda x: original_jac(torch.tensor(x).float()).cpu().numpy()
+        constr["fun"] = lambda x: _to_numpy_float64(original_fun(torch.tensor(x).float()).cpu().numpy())
+        constr["jac"] = lambda x: _to_numpy_float64(original_jac(torch.tensor(x).float()).cpu().numpy())
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
