@@ -37,7 +37,7 @@ run_intervention() {
     model.train_batch_size="$train_batch_size" model.val_batch_size="$val_batch_size" \
     model.inter_policy=prob_unc \
     workers="$workers" model.compile=false train_only=false intervene_only=true \
-    intervention_max_batches="$max_batches" \
+    intervention_max_batches="$max_batches" intervention_log_interval=1 \
     "$@" > "$log_file" 2>&1
   status=$?
   set -e
