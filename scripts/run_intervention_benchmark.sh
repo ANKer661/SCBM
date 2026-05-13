@@ -3,6 +3,7 @@ set -euo pipefail
 
 seed="${SEED:-42}"
 max_batches="${INTERVENTION_MAX_BATCHES:-10}"
+max_steps="${INTERVENTION_MAX_STEPS:-}"
 timing_file="${TIMING_FILE:-intervention_benchmark_current.tsv}"
 log_dir="${LOG_DIR:-verification/intervention_benchmark_current}"
 
@@ -28,6 +29,10 @@ run_intervention() {
   local intervention_sec
 
   echo "Running intervention benchmark for ${name}"
+  extra_args=()
+  if [ -n "$max_steps" ]; then
+    extra_args+=(intervention_max_steps="$max_steps")
+  fi
   set +e
   python -u train.py +model="$config_model" +data="$data" \
     experiment_name="intervention_benchmark_${data}_${model_label}_${seed}" seed="$seed" \
@@ -38,6 +43,7 @@ run_intervention() {
     model.inter_policy=prob_unc \
     workers="$workers" model.compile=false train_only=false intervene_only=true \
     intervention_max_batches="$max_batches" intervention_log_interval=1 \
+    "${extra_args[@]}" \
     "$@" > "$log_file" 2>&1
   status=$?
   set -e
@@ -65,9 +71,9 @@ run_dataset() {
   run_intervention "$data" CEM CEM "$encoder_arch" "$learning_rate" "$weight_decay" "$train_batch_size" "$val_batch_size" "$workers"
   run_intervention "$data" CBM CBM "$encoder_arch" "$learning_rate" "$weight_decay" "$train_batch_size" "$val_batch_size" "$workers"
   run_intervention "$data" SCBM-amortized SCBM "$encoder_arch" "$learning_rate" "$weight_decay" "$train_batch_size" "$val_batch_size" "$workers" \
-    model.cov_type=amortized model.reg_precision=l1 model.inter_strategy=simple_perc
+    model.cov_type=amortized model.reg_precision=l1
   run_intervention "$data" SCBM-global SCBM "$encoder_arch" "$learning_rate" "$weight_decay" "$train_batch_size" "$val_batch_size" "$workers" \
-    model.cov_type=global model.reg_precision=None model.inter_strategy=simple_perc
+    model.cov_type=global model.reg_precision=None
 }
 
 run_dataset synthetic FCNN 0.0002 0.0001 256 64 2
