@@ -44,7 +44,7 @@ def build_datasets(config_base, config_data) -> DatasetSplits:
             train_ratio=0.6,
             val_ratio=0.2,
             sim_type=sim_type,
-            seed=config_base.seed,
+            seed=config_data.get("synthetic_seed", config_base.seed),
         )
     elif config_data.dataset == "CUB":
         print("CUB DATASET")

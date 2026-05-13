@@ -5,6 +5,7 @@ defaults:
   - data_defaults # Inherit data_defaults arguments
 dataset: 'synthetic' # Name of the dataset 
 sim_type: 'correlated_c' # Name of the simulation
+synthetic_seed: 0 # Fixed seed for synthetic data generation and train/val/test split
 num_classes: 2 # Binary classification problem
 num_concepts: 100 # Number of concepts
 num_covariates: 1500 # Number of covariates per data point
