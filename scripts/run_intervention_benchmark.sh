@@ -70,6 +70,6 @@ run_dataset() {
     model.cov_type=global model.reg_precision=None model.inter_strategy=simple_perc
 }
 
-run_dataset synthetic FCNN 0.0002 0.0001 256 512 2
-run_dataset CUB resnet18 0.0001 0.0001 64 256 12
-run_dataset cifar10 simple_CNN 0.0002 0.0001 256 512 12
+run_dataset synthetic FCNN 0.0002 0.0001 256 64 2
+run_dataset CUB resnet18 0.0001 0.0001 64 64 12
+run_dataset cifar10 simple_CNN 0.0002 0.0001 256 64 12
