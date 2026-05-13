@@ -20,7 +20,7 @@ class FCNNEncoder(nn.Module):
         self.bn0 = nn.BatchNorm1d(num_hidden)
         self.fcs = nn.ModuleList([nn.Linear(num_hidden, num_hidden) for _ in range(num_deep)])
         self.bns = nn.ModuleList([nn.BatchNorm1d(num_hidden) for _ in range(num_deep)])
-        self.dp = nn.Dropout(0.05)
+        self.dp = nn.Dropout(0.25)
 
     def forward(self, x):
         z = self.bn0(self.dp(F.relu(self.fc0(x))))
