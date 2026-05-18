@@ -10,7 +10,7 @@ do
   do
     python -u train.py +model=$model +data=$data \
       experiment_name="${data}_${model}_${i}" seed=$i \
-      logging.project=SCBM logging.mode=offline \
+      logging.project=SCBM_synthetic logging.mode=online \
       model.tag=$tag model.encoder_arch=$encoder_arch \
       model.j_epochs=150 model.c_epochs=100 model.t_epochs=50 \
       model.learning_rate=0.0001 model.weight_decay=0.0001 \
@@ -20,7 +20,7 @@ do
 
   python -u train.py +model=SCBM +data=$data model.cov_type='amortized' \
     model.reg_precision='l1' model.reg_weight=1 experiment_name="${data}_SCBM_amortized_${i}" \
-    seed=$i logging.project=SCBM logging.mode=offline \
+    seed=$i logging.project=SCBM_synthetic logging.mode=online \
     model.tag=$tag model.encoder_arch=$encoder_arch \
     model.j_epochs=150 model.c_epochs=100 model.t_epochs=50\
     model.learning_rate=0.0001 model.weight_decay=0.0001 \
@@ -28,7 +28,7 @@ do
     workers=2
   python -u train.py +model=SCBM +data=$data model.cov_type='global' \
     model.reg_precision=None experiment_name="${data}_SCBM_global_${i}" \
-    seed=$i logging.project=SCBM logging.mode=offline \
+    seed=$i logging.project=SCBM_synthetic logging.mode=online \
     model.tag=$tag model.encoder_arch=$encoder_arch \
     model.j_epochs=150 model.c_epochs=100 model.t_epochs=50 \
     model.learning_rate=0.0001 model.weight_decay=0.0001 \
