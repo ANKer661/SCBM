@@ -13,7 +13,7 @@ do
       logging.project=SCBM logging.mode=offline \
       model.tag=$tag model.encoder_arch=$encoder_arch \
       model.j_epochs=150 model.c_epochs=100 model.t_epochs=50 \
-      model.learning_rate=0.0002 model.weight_decay=0.0001 \
+      model.learning_rate=0.0001 model.weight_decay=0.0001 \
       model.train_batch_size=256 model.val_batch_size=512 \
       workers=2
   done
@@ -23,7 +23,7 @@ do
     seed=$i logging.project=SCBM logging.mode=offline \
     model.tag=$tag model.encoder_arch=$encoder_arch \
     model.j_epochs=150 model.c_epochs=100 model.t_epochs=50\
-    model.learning_rate=0.0002 model.weight_decay=0.0001 \
+    model.learning_rate=0.0001 model.weight_decay=0.0001 \
     model.train_batch_size=256 model.val_batch_size=512 \
     workers=2
   python -u train.py +model=SCBM +data=$data model.cov_type='global' \
@@ -31,7 +31,7 @@ do
     seed=$i logging.project=SCBM logging.mode=offline \
     model.tag=$tag model.encoder_arch=$encoder_arch \
     model.j_epochs=150 model.c_epochs=100 model.t_epochs=50 \
-    model.learning_rate=0.0002 model.weight_decay=0.0001 \
+    model.learning_rate=0.0001 model.weight_decay=0.0001 \
     model.train_batch_size=256 model.val_batch_size=512 \
     workers=2
 done
