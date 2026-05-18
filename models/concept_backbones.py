@@ -31,8 +31,8 @@ class FCNNEncoder(nn.Module):
 
 def build_encoder(config, config_model):
     if config_model.encoder_arch == "FCNN":
-        n_features = 256
-        encoder = FCNNEncoder(num_inputs=config.data.num_covariates, num_hidden=n_features, num_deep=2)
+        n_features = 64
+        encoder = FCNNEncoder(num_inputs=config.data.num_covariates, num_hidden=n_features, num_deep=1)
         return encoder, n_features, None
 
     if config_model.encoder_arch == "resnet18":
