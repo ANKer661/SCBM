@@ -23,16 +23,16 @@ class FCNNEncoder(nn.Module):
         self.dp = nn.Dropout(0.25)
 
     def forward(self, x):
-        z = self.bn0(self.dp(F.relu(self.fc0(x))))
+        z = self.dp(F.relu(self.bn0(self.fc0(x))))
         for bn, fc in zip(self.bns, self.fcs):
-            z = bn(self.dp(F.relu(fc(z))))
+            z = self.dp(F.relu(bn(fc(z))))
         return z
 
 
 def build_encoder(config, config_model):
     if config_model.encoder_arch == "FCNN":
-        n_features = 64
-        encoder = FCNNEncoder(num_inputs=config.data.num_covariates, num_hidden=n_features, num_deep=1)
+        n_features = 128
+        encoder = FCNNEncoder(num_inputs=config.data.num_covariates, num_hidden=n_features, num_deep=2)
         return encoder, n_features, None
 
     if config_model.encoder_arch == "resnet18":
