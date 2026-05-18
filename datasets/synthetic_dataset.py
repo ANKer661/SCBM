@@ -102,7 +102,7 @@ def generate_synthetic_data_correlated_c(p: int, n: int, k: int, seed: int):
     g = random_nonlin_map(
         n_in=k,
         n_out=p,
-        n_hidden=5,
+        n_hidden=10,
     )
     # Generate covariates
     # Concept groups get mapped to one
@@ -111,7 +111,7 @@ def generate_synthetic_data_correlated_c(p: int, n: int, k: int, seed: int):
     ss = StandardScaler()
     X = ss.fit_transform(X)
     # Add Gaussian noise after standardization to ensure similar effect on all covariates and have intuition on how much noise is added
-    X = X + np.random.normal(0, 1.0, X.shape)
+    X = X + np.random.normal(0, 0.5, X.shape)
     ss = StandardScaler()
     X = ss.fit_transform(X)
 
