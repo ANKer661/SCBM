@@ -36,13 +36,19 @@ def build_encoder(config, config_model):
         return encoder, n_features, None
 
     if config_model.encoder_arch == "resnet18":
-        encoder_res = tv_models.resnet18(weights=None)
-        encoder_res.load_state_dict(
-            torch.load(
-                os.path.join(config_model.model_directory, "resnet/resnet18-5c106cde.pth"),
-                weights_only=False,
-            )
-        )
+        # encoder_res = tv_models.resnet18(weights=None)
+        # encoder_res.load_state_dict(
+        #     torch.load(
+        #         os.path.join(config_model.model_directory, "resnet/resnet18-5c106cde.pth"),
+        #         weights_only=False,
+        #     )
+        # )
+        # previous implementation load weights mannually
+        # now we directly load pretrained weights from torchvision
+        # Logically, these two weights should be the same and have no effect on the reproducibility.
+        # But we did the reproduction on previous weights
+        # so we keep previous weights name in case anyone want to use previous weights for reproduction.
+        encoder_res = tv_models.resnet18(weights=tv_models.ResNet18_Weights.IMAGENET1K_V1)
         n_features = encoder_res.fc.in_features
         encoder_res.fc = nn.Identity()  # type: ignore
         encoder = nn.Sequential(encoder_res)
