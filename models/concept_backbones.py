@@ -31,6 +31,9 @@ class FCNNEncoder(nn.Module):
 
 def build_encoder(config, config_model):
     if config_model.encoder_arch == "FCNN":
+        # Reproduction note: the legacy implementation used width 256. The
+        # current width 128 is a synthetic-model configuration change, not an
+        # execution-only optimization, so comparisons must control for it.
         n_features = 128
         encoder = FCNNEncoder(num_inputs=config.data.num_covariates, num_hidden=n_features, num_deep=2)
         return encoder, n_features, None
